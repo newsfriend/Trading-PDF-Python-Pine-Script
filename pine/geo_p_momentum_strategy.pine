@@ -48,6 +48,7 @@ groupDisplay = "Display"
 showSignals = input.bool(true, "Show BUY/SELL labels", group=groupDisplay)
 showTradeLevels = input.bool(false, "Show active stop/target lines", group=groupDisplay)
 showBands = input.bool(false, "Show Bollinger Bands", group=groupDisplay)
+plotOneCandleEarly = input.bool(false, "Plot BUY/SELL 1 candle earlier", group=groupDisplay)
 
 f_recent(condition, bars) =>
     barsSince = ta.barssince(condition)
@@ -212,29 +213,31 @@ var float activeStop = na
 var float activeTarget = na
 
 if strategy.position_size > 0 and shortEntrySignal
-    strategy.close("Long", comment="Opposite SELL")
+    strategy.close("BUY", comment="SELL")
 
 if strategy.position_size < 0 and longEntrySignal
-    strategy.close("Short", comment="Opposite BUY")
+    strategy.close("SELL", comment="BUY")
 
 if strategy.position_size == 0 and longEntrySignal
     activeStop := longStop
     activeTarget := longTarget
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop=activeStop, limit=activeTarget)
+    strategy.entry("BUY", strategy.long)
+    strategy.exit("BUY Exit", "BUY", stop=activeStop, limit=activeTarget)
 
 if strategy.position_size == 0 and shortEntrySignal
     activeStop := shortStop
     activeTarget := shortTarget
-    strategy.entry("Short", strategy.short)
-    strategy.exit("Short Exit", "Short", stop=activeStop, limit=activeTarget)
+    strategy.entry("SELL", strategy.short)
+    strategy.exit("SELL Exit", "SELL", stop=activeStop, limit=activeTarget)
 
 if strategy.position_size == 0 and not longEntrySignal and not shortEntrySignal
     activeStop := na
     activeTarget := na
 
-plotshape(showSignals and longEntrySignal, title="BUY Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
-plotshape(showSignals and shortEntrySignal, title="SELL Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+plotshape(showSignals and not plotOneCandleEarly and longEntrySignal, title="BUY Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+plotshape(showSignals and not plotOneCandleEarly and shortEntrySignal, title="SELL Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+plotshape(showSignals and plotOneCandleEarly and longEntrySignal, title="BUY Signal Early Plot", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal, offset=-1)
+plotshape(showSignals and plotOneCandleEarly and shortEntrySignal, title="SELL Signal Early Plot", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal, offset=-1)
 plot(showTradeLevels ? activeStop : na, "Active Stop", color=color.new(color.red, 0), style=plot.style_linebr)
 plot(showTradeLevels ? activeTarget : na, "Active Target", color=color.new(color.green, 0), style=plot.style_linebr)
 plot(showBands ? bbUpper : na, "BB Upper", color=color.new(color.gray, 45))

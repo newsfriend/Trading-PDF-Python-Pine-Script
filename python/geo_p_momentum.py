@@ -327,7 +327,7 @@ def backtest_signals(signals: pd.DataFrame) -> pd.DataFrame:
             if stop_hit or target_hit or opposite:
                 exit_price = stop if stop_hit else target if target_hit else float(row["close"])
                 reason = "stop" if stop_hit else "target_1" if target_hit else "opposite_signal"
-                trades.append(_trade_dict("long", entry_time, timestamp, entry, exit_price, stop, target, reason))
+                trades.append(_trade_dict("BUY", entry_time, timestamp, entry, exit_price, stop, target, reason))
                 position = 0
         elif position == -1:
             stop_hit = float(row["high"]) >= stop
@@ -336,7 +336,7 @@ def backtest_signals(signals: pd.DataFrame) -> pd.DataFrame:
             if stop_hit or target_hit or opposite:
                 exit_price = stop if stop_hit else target if target_hit else float(row["close"])
                 reason = "stop" if stop_hit else "target_1" if target_hit else "opposite_signal"
-                trades.append(_trade_dict("short", entry_time, timestamp, entry, exit_price, stop, target, reason))
+                trades.append(_trade_dict("SELL", entry_time, timestamp, entry, exit_price, stop, target, reason))
                 position = 0
 
     return pd.DataFrame(trades)
@@ -634,8 +634,8 @@ def _trade_dict(
     target: float,
     reason: str,
 ) -> dict[str, object]:
-    pnl = exit_price - entry if side == "long" else entry - exit_price
-    risk = entry - stop if side == "long" else stop - entry
+    pnl = exit_price - entry if side == "BUY" else entry - exit_price
+    risk = entry - stop if side == "BUY" else stop - entry
     rr = pnl / risk if risk > 0 else np.nan
     return {
         "side": side,

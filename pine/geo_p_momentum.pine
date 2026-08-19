@@ -47,6 +47,7 @@ groupDisplay = "Display"
 showBands = input.bool(false, "Show Bollinger Bands", group=groupDisplay)
 showEma50 = input.bool(false, "Show 50 EMA", group=groupDisplay)
 paintBars = input.bool(true, "Color signal bars", group=groupDisplay)
+plotOneCandleEarly = input.bool(false, "Plot BUY/SELL 1 candle earlier", group=groupDisplay)
 
 f_recent(condition, bars) =>
     barsSince = ta.barssince(condition)
@@ -192,8 +193,10 @@ sellSignal = sellSetup and not (sellSetup[1] == true) and confirmedBar
 longEntrySignal = buySignal
 shortEntrySignal = sellSignal
 
-plotshape(longEntrySignal, title="BUY Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
-plotshape(shortEntrySignal, title="SELL Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+plotshape(not plotOneCandleEarly and longEntrySignal, title="BUY Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+plotshape(not plotOneCandleEarly and shortEntrySignal, title="SELL Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+plotshape(plotOneCandleEarly and longEntrySignal, title="BUY Signal Early Plot", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal, offset=-1)
+plotshape(plotOneCandleEarly and shortEntrySignal, title="SELL Signal Early Plot", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal, offset=-1)
 
 plot(showBands ? bbUpper : na, "BB Upper", color=color.new(color.gray, 45))
 plot(showBands ? bbBasis : na, "BB Basis", color=color.new(color.gray, 65))

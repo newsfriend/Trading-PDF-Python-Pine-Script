@@ -18,6 +18,7 @@ the client.
 - Keep `Signal strength` identical in Pine and Python.
 - Keep `Required Better rows` identical in Pine and Python.
 - Keep all indicator lengths and thresholds identical.
+- Keep `Plot BUY/SELL 1 candle earlier` off during parity checks; it only shifts the visible marker.
 
 ## Python Backtest
 

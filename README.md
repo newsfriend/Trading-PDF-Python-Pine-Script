@@ -26,7 +26,7 @@ remaining PDFs are supplied.
 
 ## Rule Mapping
 
-The first PDF/screenshot checklist is implemented as a long/short setup.
+The first PDF/screenshot checklist is implemented as a BUY/SELL setup.
 Rows marked `Buy` or `Sell` are scored. The `Signal strength` input controls
 how many of those rows must agree:
 
@@ -94,8 +94,8 @@ Better confirmations available as optional filters:
 
 The full Pine strategy and Python backtester use the PDF stop/target wording:
 
-- Long stop: below the BB challenge candle or TLBO point.
-- Short stop: above the BB challenge candle or TLBD point.
+- BUY stop: below the BB challenge candle or TLBO point.
+- SELL stop: above the BB challenge candle or TLBD point.
 - Target 1: nearest major support/resistance when available; otherwise a Fibonacci extension of the recent swing range.
 
 ## Configurable Assumptions
@@ -124,6 +124,10 @@ continuation moves. The implementation interprets that visual as:
 
 The signal-only Pine indicator plots the PDF setup signal directly; the strategy
 file additionally checks valid stop/target placement before placing orders.
+Both Pine files include a display option named `Plot BUY/SELL 1 candle earlier`.
+This shifts only the visible chart marker one bar left. It does not move alerts,
+orders, or Python signals earlier, because that would require predicting a
+future confirmed candle and would repaint.
 
 ## TradingView Usage
 
@@ -132,6 +136,7 @@ file additionally checks valid stop/target placement before placing orders.
 3. Paste `pine/geo_p_momentum.pine` instead only when the client wants signal markers and alerts without strategy orders.
 4. Set `Tide timeframe` to the higher timeframe used by the client, or leave blank to use the chart timeframe.
 5. Keep `Signal strength` and `Required Better rows` the same in Pine and Python when comparing signals.
+6. Enable `Plot BUY/SELL 1 candle earlier` only when the client wants earlier-looking chart labels for visual review.
 
 ## Python Usage
 
@@ -172,4 +177,5 @@ For candle-for-candle alignment between TradingView and Python:
 - Use the same Signal strength in both environments.
 - Use the same Required Better rows / `min_better_confirmations` value.
 - Keep all indicator inputs identical.
+- Leave `Plot BUY/SELL 1 candle earlier` off during Pine/Python parity checks because it is display-only.
 - If the client supplies exact formulas for TI, ADX Ungli, or target calculation, update both Pine and Python together.

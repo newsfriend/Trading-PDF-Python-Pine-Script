@@ -64,8 +64,8 @@ Better rows:
 
 ## Step 3 - Stop Loss
 
-- Long trade: below BBC candle or below TLBO point.
-- Short trade: above BBC candle or above TLBD point.
+- BUY trade: below BBC candle or below TLBO point.
+- SELL trade: above BBC candle or above TLBD point.
 
 ## Step 4 - Target
 
