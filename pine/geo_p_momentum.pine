@@ -1,0 +1,210 @@
+//@version=6
+indicator("GEO P Momentum Buy/Sell Signals", overlay=true, max_labels_count=500, dynamic_requests=false)
+
+// Source PDF:
+// Check List for Momentum Trader : Bollinger Band Challenge with Trendline Break
+//
+// Client goal:
+// - If price is moving up and likely to continue up, show BUY.
+// - If price is moving down and likely to continue down, show SELL.
+// - Must work on TradingView across chart timeframes.
+// - Only BUY/SELL signals are plotted.
+
+groupTf = "Timeframe"
+tideTfInput = input.timeframe("", "Tide timeframe, blank = chart", group=groupTf)
+confirmOnClose = input.bool(true, "Signal only after candle close", group=groupTf)
+
+groupPdf = "PDF Setup"
+signalMode = input.string("Balanced", "Signal strength", options=["Fast", "Balanced", "Strict PDF"], group=groupPdf)
+bbLength = input.int(20, "Bollinger Band length", minval=1, group=groupPdf)
+bbMult = input.float(2.0, "Bollinger Band deviation", minval=0.1, step=0.1, group=groupPdf)
+rsiLength = input.int(14, "RSI length", minval=1, group=groupPdf)
+rsiLongBase = input.float(50.0, "Buy RSI threshold", minval=0.0, maxval=100.0, step=0.5, group=groupPdf)
+rsiShortBase = input.float(50.0, "Sell RSI threshold", minval=0.0, maxval=100.0, step=0.5, group=groupPdf)
+rsiStrongLong = input.float(60.0, "Better buy RSI cross", minval=0.0, maxval=100.0, step=0.5, group=groupPdf)
+rsiStrongShort = input.float(40.0, "Better sell RSI cross", minval=0.0, maxval=100.0, step=0.5, group=groupPdf)
+tiFast = input.int(13, "TI fast EMA", minval=1, group=groupPdf)
+tiSlow = input.int(26, "TI slow EMA", minval=2, group=groupPdf)
+minBetterConfirmations = input.int(0, "Required Better rows", minval=0, maxval=4, group=groupPdf)
+
+groupWave = "Wave Confirmation"
+pivotLeft = input.int(5, "Trendline pivot left", minval=1, group=groupWave)
+pivotRight = input.int(5, "Trendline pivot right", minval=1, group=groupWave)
+breakoutLookback = input.int(20, "Trendline fallback range", minval=2, group=groupWave)
+syncBars = input.int(3, "BB challenge and trend break sync bars", minval=0, group=groupWave)
+volumeLength = input.int(20, "Average volume length", minval=1, group=groupWave)
+emaCrossLookback = input.int(3, "EMA cross lookback", minval=0, group=groupWave)
+dmiLength = input.int(14, "DI length", minval=1, group=groupWave)
+adxSmoothing = input.int(14, "ADX smoothing", minval=1, group=groupWave)
+adxFloor = input.float(15.0, "ADX minimum", minval=0.0, step=0.5, group=groupWave)
+
+groupRisk = "Risk Validation"
+atrLength = input.int(14, "ATR length", minval=1, group=groupRisk)
+stopAtrBuffer = input.float(0.0, "Stop ATR buffer", minval=0.0, step=0.05, group=groupRisk)
+majorSrLookback = input.int(100, "Major support/resistance lookback", minval=10, group=groupRisk)
+majorSrMinAtr = input.float(1.0, "Immediate S/R distance in ATR", minval=0.0, step=0.1, group=groupRisk)
+targetLookback = input.int(80, "Fibonacci target swing lookback", minval=10, group=groupRisk)
+fibTarget = input.float(0.618, "Target 1 Fibonacci extension", minval=0.1, step=0.001, group=groupRisk)
+
+groupDisplay = "Display"
+showBands = input.bool(false, "Show Bollinger Bands", group=groupDisplay)
+showEma50 = input.bool(false, "Show 50 EMA", group=groupDisplay)
+paintBars = input.bool(true, "Color signal bars", group=groupDisplay)
+
+f_recent(condition, bars) =>
+    barsSince = ta.barssince(condition)
+    not na(barsSince) and barsSince <= bars
+
+f_tide_values() =>
+    basis = ta.sma(close, bbLength)
+    deviation = bbMult * ta.stdev(close, bbLength)
+    upperBand = basis + deviation
+    lowerBand = basis - deviation
+    ti = ta.ema(close, tiFast) - ta.ema(close, tiSlow)
+    rsiValue = ta.rsi(close, rsiLength)
+    tideBuy = (high >= upperBand or close >= basis) and ti > ti[1] and rsiValue > rsiLongBase
+    tideSell = (low <= lowerBand or close <= basis) and ti < ti[1] and rsiValue < rsiShortBase
+    [tideBuy, tideSell, ti]
+
+tideTf = tideTfInput == "" ? timeframe.period : tideTfInput
+[tideBuyOk, tideSellOk, tideTi] = request.security(syminfo.tickerid, tideTf, f_tide_values(), barmerge.gaps_off, barmerge.lookahead_off)
+
+bbBasis = ta.sma(close, bbLength)
+bbDev = bbMult * ta.stdev(close, bbLength)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+ema5 = ta.ema(close, 5)
+ema13 = ta.ema(close, 13)
+ema26 = ta.ema(close, 26)
+ema50 = ta.ema(close, 50)
+rsiValue = ta.rsi(close, rsiLength)
+avgVolume = ta.sma(volume, volumeLength)
+atrValue = ta.atr(atrLength)
+[diPlus, diMinus, adxValue] = ta.dmi(dmiLength, adxSmoothing)
+
+// Confirmed pivots create the trendline break part of the PDF setup.
+pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
+pivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
+
+var float lastHighPivot = na
+var float prevHighPivot = na
+var int lastHighBar = na
+var int prevHighBar = na
+var float lastLowPivot = na
+var float prevLowPivot = na
+var int lastLowBar = na
+var int prevLowBar = na
+
+if not na(pivotHigh)
+    prevHighPivot := lastHighPivot
+    prevHighBar := lastHighBar
+    lastHighPivot := pivotHigh
+    lastHighBar := bar_index - pivotRight
+
+if not na(pivotLow)
+    prevLowPivot := lastLowPivot
+    prevLowBar := lastLowBar
+    lastLowPivot := pivotLow
+    lastLowBar := bar_index - pivotRight
+
+hasHighTrend = not na(lastHighPivot) and not na(prevHighPivot) and not na(lastHighBar) and not na(prevHighBar) and lastHighBar != prevHighBar
+hasLowTrend = not na(lastLowPivot) and not na(prevLowPivot) and not na(lastLowBar) and not na(prevLowBar) and lastLowBar != prevLowBar
+upperTrendline = hasHighTrend ? prevHighPivot + (lastHighPivot - prevHighPivot) * (bar_index - prevHighBar) / (lastHighBar - prevHighBar) : na
+lowerTrendline = hasLowTrend ? prevLowPivot + (lastLowPivot - prevLowPivot) * (bar_index - prevLowBar) / (lastLowBar - prevLowBar) : na
+
+rangeHigh = ta.highest(high, breakoutLookback)[1]
+rangeLow = ta.lowest(low, breakoutLookback)[1]
+pivotBreakUpRaw = ta.crossover(close, upperTrendline)
+pivotBreakDownRaw = ta.crossunder(close, lowerTrendline)
+rangeBreakUpRaw = ta.crossover(close, rangeHigh)
+rangeBreakDownRaw = ta.crossunder(close, rangeLow)
+tlbo = (hasHighTrend and pivotBreakUpRaw) or (not na(rangeHigh) and rangeBreakUpRaw)
+tlbd = (hasLowTrend and pivotBreakDownRaw) or (not na(rangeLow) and rangeBreakDownRaw)
+tlboPoint = hasHighTrend and pivotBreakUpRaw ? upperTrendline : rangeHigh
+tlbdPoint = hasLowTrend and pivotBreakDownRaw ? lowerTrendline : rangeLow
+
+bbuc = high >= bbUpper
+bbdc = low <= bbLower
+waveBuyCore = f_recent(bbuc, syncBars) and f_recent(tlbo, syncBars)
+waveSellCore = f_recent(bbdc, syncBars) and f_recent(tlbd, syncBars)
+
+closePivotLow = ta.pivotlow(close, pivotLeft, pivotRight)
+closePivotHigh = ta.pivothigh(close, pivotLeft, pivotRight)
+var float lastCloseLow = na
+var float prevCloseLow = na
+var float lastCloseHigh = na
+var float prevCloseHigh = na
+
+if not na(closePivotLow)
+    prevCloseLow := lastCloseLow
+    lastCloseLow := closePivotLow
+
+if not na(closePivotHigh)
+    prevCloseHigh := lastCloseHigh
+    lastCloseHigh := closePivotHigh
+
+twoHigherLows = not na(lastCloseLow) and not na(prevCloseLow) and lastCloseLow > prevCloseLow
+twoLowerHighs = not na(lastCloseHigh) and not na(prevCloseHigh) and lastCloseHigh < prevCloseHigh
+
+emaBuyCross13 = ta.crossover(ema5, ema13)
+emaBuyCross26 = ta.crossover(ema5, ema26)
+emaSellCross13 = ta.crossunder(ema5, ema13)
+emaSellCross26 = ta.crossunder(ema5, ema26)
+emaBuyOk = f_recent(emaBuyCross13 or emaBuyCross26, emaCrossLookback)
+emaSellOk = f_recent(emaSellCross13 or emaSellCross26, emaCrossLookback)
+
+diBuyCross = ta.crossover(diPlus, diMinus)
+diSellCross = ta.crossover(diMinus, diPlus)
+diBuyOk = f_recent(diBuyCross, emaCrossLookback)
+diSellOk = f_recent(diSellCross, emaCrossLookback)
+adxOk = adxValue >= adxFloor or (adxValue > adxValue[1] and adxValue[1] <= adxValue[2])
+volumeBuyOk = close > open and volume > avgVolume
+volumeSellOk = close < open and volume > avgVolume
+majorResistance = ta.highest(high, majorSrLookback)[1]
+majorSupport = ta.lowest(low, majorSrLookback)[1]
+noImmediateResistance = na(majorResistance) or close >= majorResistance or majorResistance - close > atrValue * majorSrMinAtr
+noImmediateSupport = na(majorSupport) or close <= majorSupport or close - majorSupport > atrValue * majorSrMinAtr
+rsiStrongBuy = ta.crossover(rsiValue, rsiStrongLong)
+rsiStrongSell = ta.crossunder(rsiValue, rsiStrongShort)
+
+pdfBuyRows = (volumeBuyOk ? 1 : 0) + (twoHigherLows ? 1 : 0) + (emaBuyOk ? 1 : 0) + (diBuyOk ? 1 : 0) + (adxOk ? 1 : 0)
+pdfSellRows = (volumeSellOk ? 1 : 0) + (twoLowerHighs ? 1 : 0) + (emaSellOk ? 1 : 0) + (diSellOk ? 1 : 0) + (adxOk ? 1 : 0)
+betterBuyRows = (tideTi > 0 ? 1 : 0) + (rsiStrongBuy ? 1 : 0) + (close > ema50 ? 1 : 0) + (noImmediateResistance ? 1 : 0)
+betterSellRows = (tideTi < 0 ? 1 : 0) + (rsiStrongSell ? 1 : 0) + (close < ema50 ? 1 : 0) + (noImmediateSupport ? 1 : 0)
+requiredRows = signalMode == "Fast" ? 0 : signalMode == "Balanced" ? 3 : 5
+
+buySetup = tideBuyOk and rsiValue > rsiLongBase and waveBuyCore and pdfBuyRows >= requiredRows and betterBuyRows >= minBetterConfirmations
+sellSetup = tideSellOk and rsiValue < rsiShortBase and waveSellCore and pdfSellRows >= requiredRows and betterSellRows >= minBetterConfirmations
+confirmedBar = confirmOnClose ? barstate.isconfirmed : true
+buySignal = buySetup and not (buySetup[1] == true) and confirmedBar
+sellSignal = sellSetup and not (sellSetup[1] == true) and confirmedBar
+
+lastBbucLow = ta.valuewhen(bbuc, low, 0)
+lastBbdcHigh = ta.valuewhen(bbdc, high, 0)
+lastTlboPoint = ta.valuewhen(tlbo, tlboPoint, 0)
+lastTlbdPoint = ta.valuewhen(tlbd, tlbdPoint, 0)
+longStop = math.min(nz(lastBbucLow, low), nz(lastTlboPoint, low)) - atrValue * stopAtrBuffer
+shortStop = math.max(nz(lastBbdcHigh, high), nz(lastTlbdPoint, high)) + atrValue * stopAtrBuffer
+
+swingRaw = ta.highest(high, targetLookback) - ta.lowest(low, targetLookback)
+swingRange = na(swingRaw) ? atrValue : math.max(swingRaw, atrValue)
+longFibTarget = close + swingRange * fibTarget
+shortFibTarget = close - swingRange * fibTarget
+longTarget = not na(majorResistance) and majorResistance > close ? majorResistance : longFibTarget
+shortTarget = not na(majorSupport) and majorSupport < close ? majorSupport : shortFibTarget
+
+longEntrySignal = buySignal and longStop < close and longTarget > close
+shortEntrySignal = sellSignal and shortStop > close and shortTarget < close
+
+plotshape(longEntrySignal, title="BUY Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+plotshape(shortEntrySignal, title="SELL Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+
+plot(showBands ? bbUpper : na, "BB Upper", color=color.new(color.gray, 45))
+plot(showBands ? bbBasis : na, "BB Basis", color=color.new(color.gray, 65))
+plot(showBands ? bbLower : na, "BB Lower", color=color.new(color.gray, 45))
+plot(showEma50 ? ema50 : na, "EMA 50", color=color.new(color.blue, 0), linewidth=2)
+barcolor(paintBars and longEntrySignal ? color.new(color.lime, 65) : paintBars and shortEntrySignal ? color.new(color.red, 65) : na)
+
+alertcondition(longEntrySignal, title="GEO P Momentum BUY", message="BUY signal on {{ticker}} {{interval}}")
+alertcondition(shortEntrySignal, title="GEO P Momentum SELL", message="SELL signal on {{ticker}} {{interval}}")
