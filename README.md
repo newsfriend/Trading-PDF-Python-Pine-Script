@@ -57,7 +57,7 @@ PDF Buy rows scored:
 - At least two higher lows on line-chart close pivots.
 - 5 EMA positive crossover with 13 EMA or 26 EMA in the last 3 bars.
 - DI positive crossover.
-- ADX hook upward or ADX above 15.
+- Directional ADX Ungli, or ADX above 15.
 
 Better confirmations available as optional filters:
 
@@ -81,7 +81,7 @@ PDF Sell rows scored:
 - At least two lower highs on line-chart close pivots.
 - 5 EMA negative crossover with 13 EMA or 26 EMA in the last 3 bars.
 - DI negative crossover.
-- ADX hook upward or ADX above 15.
+- Directional ADX Ungli, or ADX above 15.
 
 Better confirmations available as optional filters:
 
@@ -110,8 +110,17 @@ a glossary:
 - `TI` is implemented as `EMA(13) - EMA(26)`, with uptick/downtick checks.
 - `TLBO/TLBD` use confirmed pivot trendline breaks, with a range-break fallback.
 - `DI PCO/NCO` use +DI/-DI crossovers from DMI.
-- `ADX Ungli` is implemented as an ADX upward hook, or ADX above 15.
+- `ADX Ungli` is implemented from the TradingView screenshots as an ADX upward hook while +DI/-DI spreads in the trade direction, or ADX above 15.
 - PDF Step 2, `SOBBO/SOBBD`, and `TMG/TMJ` are intentionally ignored per the latest instruction.
+
+## TradingView Screenshot Alignment
+
+The supplied TradingView screenshots highlight the lower ADX/DMI panel before
+continuation moves. The implementation interprets that visual as:
+
+- Buy-side ADX Ungli: ADX hooks upward, +DI is above -DI, and the DI spread expands.
+- Sell-side ADX Ungli: ADX hooks upward, -DI is above +DI, and the DI spread expands.
+- The same rules are used in Pine and Python.
 
 ## TradingView Usage
 

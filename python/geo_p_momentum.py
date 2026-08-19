@@ -135,10 +135,29 @@ def compute_signals(
     di_nco = _crossover(result["wave_di_minus"], result["wave_di_plus"])
     result["di_pco"] = _recent(di_pco, cfg.ema_cross_lookback)
     result["di_nco"] = _recent(di_nco, cfg.ema_cross_lookback)
+    # ADX Ungli from the chart examples: ADX hooks upward while directional
+    # movement separates in the trade direction.
+    di_spread = (result["wave_di_plus"] - result["wave_di_minus"]).abs()
+    result["di_spread_expanding"] = di_spread > di_spread.shift(1)
     result["adx_hook"] = (result["wave_adx"] > result["wave_adx"].shift(1)) & (
         result["wave_adx"].shift(1) <= result["wave_adx"].shift(2)
     )
-    result["adx_ok"] = result["adx_hook"] | (result["wave_adx"] >= cfg.adx_floor)
+    result["adx_ungli_buy"] = (
+        result["adx_hook"]
+        & (result["wave_di_plus"] > result["wave_di_minus"])
+        & result["di_spread_expanding"]
+    )
+    result["adx_ungli_sell"] = (
+        result["adx_hook"]
+        & (result["wave_di_minus"] > result["wave_di_plus"])
+        & result["di_spread_expanding"]
+    )
+    result["adx_buy_ok"] = (result["wave_adx"] >= cfg.adx_floor) | _recent(
+        result["adx_ungli_buy"], cfg.ema_cross_lookback
+    )
+    result["adx_sell_ok"] = (result["wave_adx"] >= cfg.adx_floor) | _recent(
+        result["adx_ungli_sell"], cfg.ema_cross_lookback
+    )
 
     major_resistance = result["high"].rolling(cfg.major_sr_lookback).max().shift(1)
     major_support = result["low"].rolling(cfg.major_sr_lookback).min().shift(1)
@@ -160,14 +179,14 @@ def compute_signals(
         result["wave_two_higher_lows"],
         result["ema_pos_cross_recent"],
         result["di_pco"],
-        result["adx_ok"],
+        result["adx_buy_ok"],
     )
     result["short_confirmations"] = _count_true(
         result["volume_short_ok"],
         result["wave_two_lower_highs"],
         result["ema_neg_cross_recent"],
         result["di_nco"],
-        result["adx_ok"],
+        result["adx_sell_ok"],
     )
     result["long_better"] = _count_true(
         result["tide_ti_above_zero"],

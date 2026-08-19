@@ -23,7 +23,7 @@ Buy rows, scored by the code:
 - Wave - at least two higher lows on line chart prior to BB challenge, preferred.
 - Wave - 5 EMA positive crossover with 13 EMA or 26 EMA in last 3 periods.
 - Wave - DI PCO.
-- Wave - ADX Ungli OR above 15.
+- Wave - directional ADX Ungli OR ADX above 15.
 
 Better rows:
 
@@ -47,7 +47,7 @@ Sell rows, scored by the code:
 - Wave - at least two lower highs on line chart prior to BB challenge, preferred.
 - Wave - 5 EMA negative crossover with 13 EMA or 26 EMA in last 3 periods.
 - Wave - DI NCO.
-- Wave - ADX Ungli OR above 15.
+- Wave - directional ADX Ungli OR ADX above 15.
 
 Better rows:
 
@@ -79,3 +79,6 @@ choices as inputs/constants so they can be replaced if the client supplies a
 glossary.
 User-supplied implementation instruction overrides the PDF where it says to
 ignore Step 2, SOBBO/SOBBD, and TMG/TMJ.
+
+TradingView screenshot review: the circled ADX/DMI areas are interpreted as an
+ADX upward hook with +DI/-DI separation in the signal direction.

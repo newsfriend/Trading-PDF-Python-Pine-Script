@@ -34,6 +34,9 @@ Ask the client to confirm exact formulas for these PDF abbreviations:
 - exact manual trendline rule, if their drawing method is proprietary
 - exact target rule, if major support/resistance or Fibonacci selection has custom rules
 
+Current ADX Ungli interpretation from the TradingView screenshots: ADX hooks
+upward while +DI/-DI separates in the signal direction.
+
 Do not ask for `SOBBO/SOBBD` or `TMG/TMJ` unless the client later reverses the
 latest instruction; those terms are intentionally ignored in this version.
 

@@ -155,7 +155,15 @@ diBuyCross = ta.crossover(diPlus, diMinus)
 diSellCross = ta.crossover(diMinus, diPlus)
 diBuyOk = f_recent(diBuyCross, emaCrossLookback)
 diSellOk = f_recent(diSellCross, emaCrossLookback)
-adxOk = adxValue >= adxFloor or (adxValue > adxValue[1] and adxValue[1] <= adxValue[2])
+// ADX Ungli from the chart examples: ADX hooks upward while directional
+// movement separates in the trade direction.
+diSpread = math.abs(diPlus - diMinus)
+diSpreadExpanding = diSpread > diSpread[1]
+adxHook = adxValue > adxValue[1] and adxValue[1] <= adxValue[2]
+adxUngliBuy = adxHook and diPlus > diMinus and diSpreadExpanding
+adxUngliSell = adxHook and diMinus > diPlus and diSpreadExpanding
+adxBuyOk = adxValue >= adxFloor or f_recent(adxUngliBuy, emaCrossLookback)
+adxSellOk = adxValue >= adxFloor or f_recent(adxUngliSell, emaCrossLookback)
 volumeBuyOk = close > open and volume > avgVolume
 volumeSellOk = close < open and volume > avgVolume
 majorResistance = ta.highest(high, majorSrLookback)[1]
@@ -165,8 +173,8 @@ noImmediateSupport = na(majorSupport) or close <= majorSupport or close - majorS
 rsiStrongBuy = ta.crossover(rsiValue, rsiStrongLong)
 rsiStrongSell = ta.crossunder(rsiValue, rsiStrongShort)
 
-pdfBuyRows = (volumeBuyOk ? 1 : 0) + (twoHigherLows ? 1 : 0) + (emaBuyOk ? 1 : 0) + (diBuyOk ? 1 : 0) + (adxOk ? 1 : 0)
-pdfSellRows = (volumeSellOk ? 1 : 0) + (twoLowerHighs ? 1 : 0) + (emaSellOk ? 1 : 0) + (diSellOk ? 1 : 0) + (adxOk ? 1 : 0)
+pdfBuyRows = (volumeBuyOk ? 1 : 0) + (twoHigherLows ? 1 : 0) + (emaBuyOk ? 1 : 0) + (diBuyOk ? 1 : 0) + (adxBuyOk ? 1 : 0)
+pdfSellRows = (volumeSellOk ? 1 : 0) + (twoLowerHighs ? 1 : 0) + (emaSellOk ? 1 : 0) + (diSellOk ? 1 : 0) + (adxSellOk ? 1 : 0)
 betterBuyRows = (tideTi > 0 ? 1 : 0) + (rsiStrongBuy ? 1 : 0) + (close > ema50 ? 1 : 0) + (noImmediateResistance ? 1 : 0)
 betterSellRows = (tideTi < 0 ? 1 : 0) + (rsiStrongSell ? 1 : 0) + (close < ema50 ? 1 : 0) + (noImmediateSupport ? 1 : 0)
 requiredRows = signalMode == "Fast" ? 0 : signalMode == "Balanced" ? 3 : 5
