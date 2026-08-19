@@ -82,3 +82,5 @@ ignore Step 2, SOBBO/SOBBD, and TMG/TMJ.
 
 TradingView screenshot review: the circled ADX/DMI areas are interpreted as an
 ADX upward hook with +DI/-DI separation in the signal direction.
+The screenshot behavior is used only to make the ADX Ungli row mechanical; the
+entry gate remains the approved PDF checklist with ignored terms excluded.

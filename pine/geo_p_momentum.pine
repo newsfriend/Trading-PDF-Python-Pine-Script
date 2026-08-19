@@ -1,5 +1,5 @@
 //@version=6
-indicator("GEO P Momentum Buy/Sell Signals", overlay=true, max_labels_count=500, dynamic_requests=false)
+indicator("GEO P Momentum Buy/Sell Signals", overlay=true, max_labels_count=500, dynamic_requests=true)
 
 // Source PDF:
 // Check List for Momentum Trader : Bollinger Band Challenge with Trendline Break
@@ -38,13 +38,10 @@ dmiLength = input.int(14, "DI length", minval=1, group=groupWave)
 adxSmoothing = input.int(14, "ADX smoothing", minval=1, group=groupWave)
 adxFloor = input.float(15.0, "ADX minimum", minval=0.0, step=0.5, group=groupWave)
 
-groupRisk = "Risk Validation"
-atrLength = input.int(14, "ATR length", minval=1, group=groupRisk)
-stopAtrBuffer = input.float(0.0, "Stop ATR buffer", minval=0.0, step=0.05, group=groupRisk)
-majorSrLookback = input.int(100, "Major support/resistance lookback", minval=10, group=groupRisk)
-majorSrMinAtr = input.float(1.0, "Immediate S/R distance in ATR", minval=0.0, step=0.1, group=groupRisk)
-targetLookback = input.int(80, "Fibonacci target swing lookback", minval=10, group=groupRisk)
-fibTarget = input.float(0.618, "Target 1 Fibonacci extension", minval=0.1, step=0.001, group=groupRisk)
+groupSr = "Support/Resistance"
+atrLength = input.int(14, "ATR length", minval=1, group=groupSr)
+majorSrLookback = input.int(100, "Major support/resistance lookback", minval=10, group=groupSr)
+majorSrMinAtr = input.float(1.0, "Immediate S/R distance in ATR", minval=0.0, step=0.1, group=groupSr)
 
 groupDisplay = "Display"
 showBands = input.bool(false, "Show Bollinger Bands", group=groupDisplay)
@@ -69,6 +66,8 @@ f_tide_values() =>
 tideTf = tideTfInput == "" ? timeframe.period : tideTfInput
 [tideBuyOk, tideSellOk, tideTi] = request.security(syminfo.tickerid, tideTf, f_tide_values(), barmerge.gaps_off, barmerge.lookahead_off)
 
+// Wave timeframe indicator values. Leaving Tide timeframe blank makes Tide and
+// Wave use the same chart candles.
 bbBasis = ta.sma(close, bbLength)
 bbDev = bbMult * ta.stdev(close, bbLength)
 bbUpper = bbBasis + bbDev
@@ -165,8 +164,8 @@ diSpreadExpanding = diSpread > diSpread[1]
 adxHook = adxValue > adxValue[1] and adxValue[1] <= adxValue[2]
 adxUngliBuy = adxHook and diPlus > diMinus and diSpreadExpanding
 adxUngliSell = adxHook and diMinus > diPlus and diSpreadExpanding
-adxBuyOk = adxValue >= adxFloor or f_recent(adxUngliBuy, emaCrossLookback)
-adxSellOk = adxValue >= adxFloor or f_recent(adxUngliSell, emaCrossLookback)
+adxBuyOk = f_recent(adxUngliBuy, emaCrossLookback) or adxValue >= adxFloor
+adxSellOk = f_recent(adxUngliSell, emaCrossLookback) or adxValue >= adxFloor
 volumeBuyOk = close > open and volume > avgVolume
 volumeSellOk = close < open and volume > avgVolume
 majorResistance = ta.highest(high, majorSrLookback)[1]
@@ -176,6 +175,8 @@ noImmediateSupport = na(majorSupport) or close <= majorSupport or close - majorS
 rsiStrongBuy = ta.crossover(rsiValue, rsiStrongLong)
 rsiStrongSell = ta.crossunder(rsiValue, rsiStrongShort)
 
+// PDF rows are scored separately from mandatory gates so the strictness can be
+// adjusted without changing the underlying indicator calculations.
 pdfBuyRows = (volumeBuyOk ? 1 : 0) + (twoHigherLows ? 1 : 0) + (emaBuyOk ? 1 : 0) + (diBuyOk ? 1 : 0) + (adxBuyOk ? 1 : 0)
 pdfSellRows = (volumeSellOk ? 1 : 0) + (twoLowerHighs ? 1 : 0) + (emaSellOk ? 1 : 0) + (diSellOk ? 1 : 0) + (adxSellOk ? 1 : 0)
 betterBuyRows = (tideTi > 0 ? 1 : 0) + (rsiStrongBuy ? 1 : 0) + (close > ema50 ? 1 : 0) + (noImmediateResistance ? 1 : 0)
@@ -188,22 +189,8 @@ confirmedBar = confirmOnClose ? barstate.isconfirmed : true
 buySignal = buySetup and not (buySetup[1] == true) and confirmedBar
 sellSignal = sellSetup and not (sellSetup[1] == true) and confirmedBar
 
-lastBbucLow = ta.valuewhen(bbuc, low, 0)
-lastBbdcHigh = ta.valuewhen(bbdc, high, 0)
-lastTlboPoint = ta.valuewhen(tlbo, tlboPoint, 0)
-lastTlbdPoint = ta.valuewhen(tlbd, tlbdPoint, 0)
-longStop = math.min(nz(lastBbucLow, low), nz(lastTlboPoint, low)) - atrValue * stopAtrBuffer
-shortStop = math.max(nz(lastBbdcHigh, high), nz(lastTlbdPoint, high)) + atrValue * stopAtrBuffer
-
-swingRaw = ta.highest(high, targetLookback) - ta.lowest(low, targetLookback)
-swingRange = na(swingRaw) ? atrValue : math.max(swingRaw, atrValue)
-longFibTarget = close + swingRange * fibTarget
-shortFibTarget = close - swingRange * fibTarget
-longTarget = not na(majorResistance) and majorResistance > close ? majorResistance : longFibTarget
-shortTarget = not na(majorSupport) and majorSupport < close ? majorSupport : shortFibTarget
-
-longEntrySignal = buySignal and longStop < close and longTarget > close
-shortEntrySignal = sellSignal and shortStop > close and shortTarget < close
+longEntrySignal = buySignal
+shortEntrySignal = sellSignal
 
 plotshape(longEntrySignal, title="BUY Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
 plotshape(shortEntrySignal, title="SELL Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)

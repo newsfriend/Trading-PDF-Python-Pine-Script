@@ -34,8 +34,6 @@ class GeoPMomentumConfig:
     pivot_right: int = 5
     trend_fallback_lookback: int = 20
     band_trend_sync_bars: int = 3
-    pattern_lookback: int = 30
-    double_pattern_atr_tolerance: float = 0.25
     ema_cross_lookback: int = 3
     dmi_length: int = 14
     adx_smoothing: int = 14
@@ -85,6 +83,7 @@ def compute_signals(
     result = result.join(wave.add_prefix("wave_"))
     result = result.join(tide.add_prefix("tide_"))
 
+    # Tide timeframe gates define the broader setup direction.
     result["tide_bbuc"] = result["tide_high"] >= result["tide_bb_upper"]
     result["tide_bbdc"] = result["tide_low"] <= result["tide_bb_lower"]
     result["tide_upper_half"] = result["tide_close"] >= result["tide_bb_basis"]
@@ -94,6 +93,7 @@ def compute_signals(
     result["tide_ti_above_zero"] = result["tide_ti"] > 0
     result["tide_ti_below_zero"] = result["tide_ti"] < 0
 
+    # RSI is checked on both Tide and Wave, matching the PDF wording.
     result["rsi_long_base_ok"] = (
         (result["tide_rsi"] > cfg.rsi_long_base)
         & (result["wave_rsi"] > cfg.rsi_long_base)
@@ -109,6 +109,7 @@ def compute_signals(
         result["wave_rsi"], pd.Series(cfg.rsi_strong_short, index=result.index)
     )
 
+    # Wave requires the Bollinger challenge and trendline break to occur close together.
     result["wave_bbu_with_tlbo"] = _recent(
         result["wave_bbuc"], cfg.band_trend_sync_bars
     ) & _recent(result["wave_tlbo"], cfg.band_trend_sync_bars)
@@ -152,11 +153,13 @@ def compute_signals(
         & (result["wave_di_minus"] > result["wave_di_plus"])
         & result["di_spread_expanding"]
     )
-    result["adx_buy_ok"] = (result["wave_adx"] >= cfg.adx_floor) | _recent(
-        result["adx_ungli_buy"], cfg.ema_cross_lookback
+    result["adx_buy_ok"] = (
+        _recent(result["adx_ungli_buy"], cfg.ema_cross_lookback)
+        | (result["wave_adx"] >= cfg.adx_floor)
     )
-    result["adx_sell_ok"] = (result["wave_adx"] >= cfg.adx_floor) | _recent(
-        result["adx_ungli_sell"], cfg.ema_cross_lookback
+    result["adx_sell_ok"] = (
+        _recent(result["adx_ungli_sell"], cfg.ema_cross_lookback)
+        | (result["wave_adx"] >= cfg.adx_floor)
     )
 
     major_resistance = result["high"].rolling(cfg.major_sr_lookback).max().shift(1)
@@ -174,6 +177,7 @@ def compute_signals(
         | ((result["close"] - major_support) > result["wave_atr"] * cfg.major_sr_min_atr)
     )
 
+    # Score PDF Buy/Sell rows and separate Better rows so strictness stays configurable.
     result["long_confirmations"] = _count_true(
         result["volume_long_ok"],
         result["wave_two_higher_lows"],
@@ -395,19 +399,6 @@ def _frame_indicators(source: pd.DataFrame, cfg: GeoPMomentumConfig) -> pd.DataF
     close_pivot_high = _pivot_series(source["close"], cfg.pivot_left, cfg.pivot_right, "high")
     out["two_higher_lows"] = _last_two_pivots_are(close_pivot_low, "rising")
     out["two_lower_highs"] = _last_two_pivots_are(close_pivot_high, "falling")
-
-    prev_support = source["low"].rolling(cfg.pattern_lookback).min().shift(1)
-    prev_resistance = source["high"].rolling(cfg.pattern_lookback).max().shift(1)
-    out["fake_breakdown"] = (source["low"] < prev_support) & (source["close"] > prev_support)
-    out["fake_breakout"] = (source["high"] > prev_resistance) & (
-        source["close"] < prev_resistance
-    )
-    out["double_bottom"] = (
-        (source["low"] - prev_support).abs() <= out["atr"] * cfg.double_pattern_atr_tolerance
-    ) & (source["close"] > source["open"])
-    out["double_top"] = (
-        (source["high"] - prev_resistance).abs() <= out["atr"] * cfg.double_pattern_atr_tolerance
-    ) & (source["close"] < source["open"])
 
     return out
 

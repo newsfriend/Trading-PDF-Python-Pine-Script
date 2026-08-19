@@ -9,6 +9,7 @@ the client.
 - Confirm it is Pine Script v6 and compiles without warnings.
 - Add it to the same symbol/timeframe used for review.
 - Paste `pine/geo_p_momentum.pine` only if the client wants signal-only alerts.
+- Use the signal-only indicator when validating the screenshot examples because it does not suppress labels with stop/target checks.
 
 ## Matching Settings
 

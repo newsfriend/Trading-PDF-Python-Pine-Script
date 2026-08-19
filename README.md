@@ -12,8 +12,8 @@ matching entry/exit signals.
 
 ## Files
 
-- `pine/geo_p_momentum_strategy.pine` - Main TradingView Pine v6 strategy with entries, exits, BUY/SELL markers, alerts, stop, and target.
-- `pine/geo_p_momentum.pine` - Signal-only TradingView Pine v6 indicator for clients who only want BUY/SELL markers and alerts.
+- `pine/geo_p_momentum_strategy.pine` - Main TradingView Pine v6 strategy with entries, exits, BUY/SELL markers, alerts, stop, and target validation.
+- `pine/geo_p_momentum.pine` - Signal-only TradingView Pine v6 indicator for clients who only want BUY/SELL markers and alerts without stop/target validation hiding labels.
 - `python/geo_p_momentum.py` - Matching Python signal engine and simple target-1 backtest helper.
 - `python/__init__.py` - Package export.
 - `docs/geo_p_momentum_pdf_rules.md` - Row-by-row extraction of the first PDF checklist.
@@ -121,6 +121,9 @@ continuation moves. The implementation interprets that visual as:
 - Buy-side ADX Ungli: ADX hooks upward, +DI is above -DI, and the DI spread expands.
 - Sell-side ADX Ungli: ADX hooks upward, -DI is above +DI, and the DI spread expands.
 - The same rules are used in Pine and Python.
+
+The signal-only Pine indicator plots the PDF setup signal directly; the strategy
+file additionally checks valid stop/target placement before placing orders.
 
 ## TradingView Usage
 
