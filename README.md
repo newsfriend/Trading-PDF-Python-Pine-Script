@@ -70,11 +70,11 @@ and Case 3 can be caught from the Tide/Wave rule.
 The Elliott Wave script is separate from the GEO BUY/SELL strategy. It draws the
 wave structure from the Elliott Wave PDFs and the reference chart.
 
-Wave 1 is anchored from Important High/Low pivots using the configurable 144-bar lookback and 61.8% degree-development rule from the notes. MACD lowest low/high and RSI or MACD divergence are used as confirmation notes, not as the only trigger for starting Wave 1. This avoids forcing a new impulse too early when price is still extending a complex correction such as a `Z` wave.
+Wave 1 is anchored from Important High/Low pivots using the configurable 144-bar lookback and 61.8% degree-development rule from the notes. The default start filter now also requires MACD lowest/highest context or RSI/MACD divergence, matching the marked chart workflow. Pine can draw the Important High/Low Fibonacci guide levels so the 14%, 23.6%, 38.2%, 50%, 61.8%, 81.2%, 100%, 111%, and 127.2% zones are visible on the chart.
 
 The correction labels are configurable. Use `A-B-C` for a simple correction,
 `W-X-Y` or `W-X-Y-X-Z` for double/triple corrections, and `A-B-C-D-E` for a
-triangle-style correction. The default `Validated Anchor` count mode filters the marked chart problem where every local ZigZag swing was being promoted into a fresh wave count. Switch to `All swings` only when lower-degree debugging is needed. The Pine overlay also shows a visible time-rule table for Wave 2, Wave 3, and Wave 4 timing rules from the notes.
+triangle-style correction. The default `Validated Anchor` count mode filters the marked chart problem where every local ZigZag swing was being promoted into a fresh wave count. Wave 4 can also be shown internally as `(A)`, `(B)`, `4/(C)`, with flat `B` validated from 61.8% to 111% as shown in the notes. Switch to `All swings` only when lower-degree debugging is needed. The Pine overlay also shows a visible time-rule table for Wave 2, Wave 3, and Wave 4 timing rules from the notes.
 
 ## Buy Side
 
@@ -208,6 +208,7 @@ ew = compute_elliott_waves(
         pivot_left=5,
         pivot_right=5,
         correction_pattern="W-X-Y-X-Z",
+        show_wave4_internal=True,
         count_mode="Validated Anchor",
         min_swing_atr_multiple=1.5,
         min_swing_range_pct=0.03,

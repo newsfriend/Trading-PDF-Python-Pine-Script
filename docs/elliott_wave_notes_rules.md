@@ -88,6 +88,35 @@ The overlay flags warnings from the notes:
 Labels remain visible even when a warning appears. A warning means the count
 needs review; it does not delete the swing.
 
+
+## Flat Correction B Wave
+
+The latest marked chart clarified that the strong upward move after Wave 3 can
+be a `B` wave inside Wave 4, not a completed Wave 5. The notes show flat
+correction rules where:
+
+- `A` is limited to a maximum 61.8% retracement.
+- `B` is valid from 61.8% minimum up to 111% maximum.
+- `C` completes the correction, so the main Wave 4 can be shown as `4/(C)`.
+
+The overlay now supports this by default with `Show Wave 4 internal A/B/C`.
+After Wave 3, the sequence is displayed as `(A)`, `(B)`, `4/(C)`, and only then
+is the next impulse swing labelled `5`.
+
+## Important High/Low Fibonacci Guide
+
+The latest marked chart shows the manual workflow more clearly: identify the
+important high and important low over the 144-bar search window, confirm the low
+or high with MACD lowest/highest point or RSI/MACD divergence, then start the
+Elliott count only after the move develops from that anchor.
+
+To mirror that process, the overlay now defaults to `Important swing +
+oscillator` for Wave 1 start confirmation and exposes `Anchor direction` so the
+count can be forced to start from a bullish important low or bearish important
+high. Pine also draws optional Important H/L Fibonacci guide levels at `0`,
+`14`, `23.6`, `38.2`, `50`, `61.8`, `81.2`, `100`, `111`, and `127.2` percent,
+matching the levels marked on the review screenshot.
+
 ## Time Rules
 
 The Pine overlay now includes a visible time table. It shows the active timing

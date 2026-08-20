@@ -39,7 +39,7 @@ the client.
 - Run `python/geo_p_momentum.py` against that CSV.
 - Compare `buy_signal`, `sell_signal`, stop, and target-1 values to the Pine strategy.
 - Run `compute_elliott_waves` on the same candles when validating the Elliott Wave overlay labels, correction pattern, Wave 1 start notes, and timing columns.
-- For Elliott Wave, verify the `Important High/Low lookback bars`, `Degree retracement %`, `Start filter`, `Count mode`, `Minimum swing ATR multiple`, `Minimum swing % of Important H/L`, and `Correction labels` inputs against the client chart.
+- For Elliott Wave, verify the `Important High/Low lookback bars`, `Degree retracement %`, `Start filter`, `Anchor direction`, `Count mode`, `Show Wave 4 internal A/B/C`, `Show Important H/L fib guide`, `Flat B minimum retrace %`, `Flat B maximum retrace %`, `Minimum swing ATR multiple`, `Minimum swing % of Important H/L`, and `Correction labels` inputs against the client chart.
 
 ## Client Confirmation
 
