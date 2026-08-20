@@ -62,6 +62,24 @@ Better rows:
 - SO - SOBBO / SOBBD is not used in code.
 - Option-chain/OI terms TMG / TMJ are not used in code.
 
+Note: this ignored Step 2 is different from the latest screenshot note that
+mentions "line number 2". The implemented line-number-2 refinement is the
+Tide/Wave RSI rule from Step 1, not the ignored SOBBO/TMG supporting indicators.
+
+## Timeframe Hierarchy Refinement
+
+Latest screenshot requirement:
+
+- When the execution chart is 15 minutes, Tide must be 4H / `240`.
+- When the execution chart is 15 minutes, Wave must be 1H / `60`.
+- BUY refinement: Tide 4H must have BBUC and TI uptick, and both Tide 4H RSI
+  and Wave 1H RSI must be above 50.
+- SELL refinement: bearish mirror using Tide BBDC, TI downtick, and both RSI
+  values below 50.
+
+`RSI > 50` is implemented as strictly greater than 50, so values such as 51 or
+52 qualify. `RSI < 50` is implemented as strictly less than 50.
+
 ## Step 3 - Stop Loss
 
 - BUY trade: below BBC candle or below TLBO point.

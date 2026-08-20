@@ -27,8 +27,8 @@ remaining PDFs are supplied.
 ## Rule Mapping
 
 The first PDF/screenshot checklist is implemented as a BUY/SELL setup.
-Rows marked `Buy` or `Sell` are scored. The `Signal strength` input controls
-how many of those rows must agree:
+Rows marked `Buy` or `Sell` are scored for the full checklist path. The
+`Signal strength` input controls how many of those rows must agree:
 
 - `Fast` - mandatory PDF conditions only.
 - `Balanced` - mandatory PDF conditions plus 3 of 5 Buy/Sell rows.
@@ -41,6 +41,23 @@ four active Better confirmations.
 
 Per the latest client/user instruction, PDF Step 2 is ignored and
 `SOBBO/SOBBD` plus `TMG/TMJ` are not used in the active signal logic.
+
+## Timeframe Mapping
+
+The latest chart review clarified that the PDF's Tide/Wave row must be applied
+as a multi-timeframe filter. With `Timeframe mapping = PDF Auto`, the scripts
+map the execution chart to higher Tide/Wave contexts. The key client example is:
+
+- On a 15-minute chart, Tide is `4H` / `240` and Wave is `1H` / `60`.
+- BUY Line #2 refinement: Tide `4H` has BBUC plus TI uptick, and both Tide
+  `4H` RSI and Wave `1H` RSI are above 50.
+- SELL Line #2 refinement: the bearish mirror uses Tide BBDC plus TI downtick,
+  and both Tide and Wave RSI are below 50.
+
+Use `Manual` mode only when the client wants to override the PDF hierarchy.
+The `Use PDF line 2 MTF refinement` input keeps this as an additional trigger
+beside the full checklist signal, so Case 1 can remain unchanged while Case 2
+and Case 3 can be caught from the Tide/Wave rule.
 
 ## Buy Side
 
@@ -134,7 +151,7 @@ future confirmed candle and would repaint.
 1. Open TradingView Pine Editor.
 2. Paste `pine/geo_p_momentum_strategy.pine` for the full strategy/backtest deliverable.
 3. Paste `pine/geo_p_momentum.pine` instead only when the client wants signal markers and alerts without strategy orders.
-4. Set `Tide timeframe` to the higher timeframe used by the client, or leave blank to use the chart timeframe.
+4. Keep `Timeframe mapping` on `PDF Auto` for the client hierarchy, or switch to `Manual` and set Tide/Wave explicitly.
 5. Keep `Signal strength` and `Required Better rows` the same in Pine and Python when comparing signals.
 6. Enable `Plot BUY/SELL 1 candle earlier` only when the client wants earlier-looking chart labels for visual review.
 
@@ -153,7 +170,7 @@ import pandas as pd
 from python.geo_p_momentum import GeoPMomentumConfig, backtest_signals, compute_signals
 
 df = pd.read_csv("xauusd_15m.csv", parse_dates=["time"]).set_index("time")
-cfg = GeoPMomentumConfig(tide_timeframe="60", signal_mode="Balanced")
+cfg = GeoPMomentumConfig(chart_timeframe="15", signal_mode="Balanced")
 
 signals = compute_signals(df, cfg)
 trades = backtest_signals(signals)
@@ -165,7 +182,7 @@ print(trades)
 Or run as a CLI:
 
 ```bash
-python python/geo_p_momentum.py xauusd_15m.csv --time-column time --tide-timeframe 60 --signal-mode Balanced --min-better-confirmations 0 --output signals.csv
+python python/geo_p_momentum.py xauusd_15m.csv --time-column time --chart-timeframe 15 --signal-mode Balanced --min-better-confirmations 0 --output signals.csv
 ```
 
 ## Parity Notes
@@ -173,7 +190,7 @@ python python/geo_p_momentum.py xauusd_15m.csv --time-column time --tide-timefra
 For candle-for-candle alignment between TradingView and Python:
 
 - Use the same OHLCV data, exchange session, timezone, and candle close timestamps.
-- Use the same Tide timeframe in both environments. Python accepts TradingView-style intraday values such as `60`.
+- Use the same Timeframe mapping, chart timeframe, Tide timeframe, and Wave timeframe in both environments. Python accepts TradingView-style intraday values such as `60`.
 - Use the same Signal strength in both environments.
 - Use the same Required Better rows / `min_better_confirmations` value.
 - Keep all indicator inputs identical.

@@ -14,11 +14,21 @@ the client.
 ## Matching Settings
 
 - Use the same symbol and chart timeframe.
-- Use the same Tide timeframe.
+- Keep `Timeframe mapping = PDF Auto` when validating the supplied 15m examples.
+- For a 15m execution chart, confirm the script resolves Tide to `240` / 4H and Wave to `60` / 1H.
+- In Manual mode, use the same Tide timeframe and Wave timeframe in both environments.
 - Keep `Signal strength` identical in Pine and Python.
 - Keep `Required Better rows` identical in Pine and Python.
 - Keep all indicator lengths and thresholds identical.
 - Keep `Plot BUY/SELL 1 candle earlier` off during parity checks; it only shifts the visible marker.
+
+## Screenshot Case Review
+
+- Case 1 remains the full PDF setup check.
+- Case 2 and Case 3 are covered by the Line #2 MTF refinement: Tide 4H BBUC
+  plus TI uptick, and both Tide 4H RSI and Wave 1H RSI strictly above 50.
+- If a marked case is still one candle late visually, test the display-only
+  `Plot BUY/SELL 1 candle earlier` setting separately from parity checks.
 
 ## Python Backtest
 

@@ -4,7 +4,8 @@ This module mirrors ``pine/geo_p_momentum_strategy.pine`` for the first client
 setup: Momentum Trader: Bollinger Band Challenge with Trendline Break.
 
 Input data must contain open, high, low, close, and volume columns. A
-DatetimeIndex is recommended when using a separate higher-timeframe tide filter.
+DatetimeIndex is recommended when using separate higher-timeframe Tide/Wave
+filters.
 """
 
 from __future__ import annotations
@@ -18,7 +19,11 @@ import pandas as pd
 class GeoPMomentumConfig:
     """Configurable parameters shared with the Pine Script version."""
 
+    timeframe_mode: str = "PDF Auto"
+    chart_timeframe: str | None = None
     tide_timeframe: str | None = None
+    wave_timeframe: str | None = None
+    use_line2_mtf_refinement: bool = True
     signal_mode: str = "Balanced"
     ti_fast: int = 13
     ti_slow: int = 26
@@ -61,27 +66,35 @@ def compute_signals(
     """Return indicator columns, buy/sell signals, stops, and targets.
 
     ``tide_candles`` can be supplied as pre-aggregated higher-timeframe OHLCV.
-    If omitted and ``config.tide_timeframe`` is set, the module resamples
-    ``candles`` with pandas. For exact TradingView parity, use the same market
-    sessions and bar close timestamps that TradingView uses.
+    If omitted, the module can resample ``candles`` with pandas using the
+    configured or PDF-auto Tide timeframe. For exact TradingView parity, use
+    the same market sessions and bar close timestamps that TradingView uses.
     """
 
     cfg = config or GeoPMomentumConfig()
     wave_source = _normalize_ohlcv(candles)
+    tide_rule, line2_wave_rule = _resolve_timeframes(wave_source, cfg)
     wave = _frame_indicators(wave_source, cfg)
 
     if tide_candles is not None:
         tide_source = _normalize_ohlcv(tide_candles)
         tide = _frame_indicators(tide_source, cfg).reindex(wave.index, method="ffill")
-    elif cfg.tide_timeframe:
-        tide_source = _resample_ohlcv(wave_source, cfg.tide_timeframe)
+    elif tide_rule:
+        tide_source = _resample_ohlcv(wave_source, tide_rule)
         tide = _frame_indicators(tide_source, cfg).reindex(wave.index, method="ffill")
     else:
         tide = wave
 
+    if line2_wave_rule:
+        line2_wave_source = _resample_ohlcv(wave_source, line2_wave_rule)
+        line2_wave = _frame_indicators(line2_wave_source, cfg).reindex(wave.index, method="ffill")
+    else:
+        line2_wave = wave
+
     result = wave_source.copy()
     result = result.join(wave.add_prefix("wave_"))
     result = result.join(tide.add_prefix("tide_"))
+    result["line2_wave_rsi"] = line2_wave["rsi"]
 
     # Tide timeframe gates define the broader setup direction.
     result["tide_bbuc"] = result["tide_high"] >= result["tide_bb_upper"]
@@ -101,6 +114,20 @@ def compute_signals(
     result["rsi_short_base_ok"] = (
         (result["tide_rsi"] < cfg.rsi_short_base)
         & (result["wave_rsi"] < cfg.rsi_short_base)
+    )
+    result["line2_buy_setup"] = (
+        cfg.use_line2_mtf_refinement
+        & result["tide_bbuc"]
+        & result["tide_ti_up"]
+        & (result["tide_rsi"] > cfg.rsi_long_base)
+        & (result["line2_wave_rsi"] > cfg.rsi_long_base)
+    )
+    result["line2_sell_setup"] = (
+        cfg.use_line2_mtf_refinement
+        & result["tide_bbdc"]
+        & result["tide_ti_down"]
+        & (result["tide_rsi"] < cfg.rsi_short_base)
+        & (result["line2_wave_rsi"] < cfg.rsi_short_base)
     )
     result["rsi_strong_long_cross"] = _crossover(
         result["wave_rsi"], pd.Series(cfg.rsi_strong_long, index=result.index)
@@ -229,8 +256,12 @@ def compute_signals(
         & (result["short_confirmations"] >= required_signal_rows)
         & (result["short_better"] >= cfg.min_better_confirmations)
     )
-    result["raw_buy_signal"] = result["long_setup"] & ~result["long_setup"].shift(1).fillna(False)
-    result["raw_sell_signal"] = result["short_setup"] & ~result["short_setup"].shift(1).fillna(False)
+    full_buy_signal = result["long_setup"] & ~result["long_setup"].shift(1).fillna(False)
+    full_sell_signal = result["short_setup"] & ~result["short_setup"].shift(1).fillna(False)
+    line2_buy_signal = result["line2_buy_setup"] & ~result["line2_buy_setup"].shift(1).fillna(False)
+    line2_sell_signal = result["line2_sell_setup"] & ~result["line2_sell_setup"].shift(1).fillna(False)
+    result["raw_buy_signal"] = full_buy_signal | line2_buy_signal
+    result["raw_sell_signal"] = full_sell_signal | line2_sell_signal
 
     swing_range = (
         result["high"].rolling(cfg.target_lookback).max()
@@ -413,9 +444,93 @@ def _normalize_ohlcv(candles: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+def _resolve_timeframes(candles: pd.DataFrame, cfg: GeoPMomentumConfig) -> tuple[str | None, str | None]:
+    """Return Tide and Line #2 Wave timeframes using the PDF auto map when enabled."""
+
+    tide_rule = cfg.tide_timeframe
+    wave_rule = cfg.wave_timeframe
+    if cfg.timeframe_mode == "Manual":
+        return tide_rule, wave_rule
+    if cfg.timeframe_mode != "PDF Auto":
+        raise ValueError('timeframe_mode must be "PDF Auto" or "Manual".')
+
+    chart_timeframe = cfg.chart_timeframe or _infer_timeframe(candles.index)
+    if not chart_timeframe:
+        return tide_rule, wave_rule
+
+    auto_tide, auto_wave = _pdf_timeframes(chart_timeframe)
+    return tide_rule or auto_tide, wave_rule or auto_wave
+
+
+def _infer_timeframe(index: pd.Index) -> str | None:
+    """Infer a TradingView-style intraday timeframe from regular timestamps."""
+
+    if not isinstance(index, pd.DatetimeIndex) or len(index) < 2:
+        return None
+    deltas = index.to_series().diff().dropna()
+    if deltas.empty:
+        return None
+    seconds = int(deltas.median().total_seconds())
+    if seconds <= 0:
+        return None
+    if seconds % 86400 == 0:
+        days = seconds // 86400
+        return "D" if days == 1 else f"{days}D"
+    if seconds % 3600 == 0 and seconds >= 3600:
+        hours = seconds // 3600
+        return "60" if hours == 1 else str(hours * 60)
+    if seconds % 60 == 0:
+        return str(seconds // 60)
+    return f"{seconds}S"
+
+
+def _pdf_timeframes(chart_timeframe: str) -> tuple[str, str]:
+    """Map execution chart timeframes to the PDF's Tide/Wave hierarchy."""
+
+    minutes = _timeframe_to_minutes(chart_timeframe)
+    if minutes is None:
+        return chart_timeframe, chart_timeframe
+    if minutes <= 3:
+        return "15", "5"
+    if minutes <= 5:
+        return "60", "15"
+    if minutes <= 15:
+        return "240", "60"
+    if minutes <= 60:
+        return "D", "240"
+    if minutes <= 240:
+        return "W", "D"
+    return "M", "W"
+
+
+def _timeframe_to_minutes(timeframe: str) -> int | None:
+    tf = str(timeframe).strip()
+    if not tf:
+        return None
+    if tf.isdigit():
+        return int(tf)
+
+    unit = tf[-1].upper()
+    multiplier_text = tf[:-1] or "1"
+    if not multiplier_text.isdigit():
+        return None
+    multiplier = int(multiplier_text)
+    if unit == "S":
+        return max(1, int(np.ceil(multiplier / 60)))
+    if unit == "H":
+        return multiplier * 60
+    if unit == "D":
+        return multiplier * 1440
+    if unit == "W":
+        return multiplier * 10080
+    if unit == "M":
+        return multiplier * 43200
+    return None
+
+
 def _resample_ohlcv(candles: pd.DataFrame, rule: str) -> pd.DataFrame:
     if not isinstance(candles.index, pd.DatetimeIndex):
-        raise ValueError("A DatetimeIndex is required when resampling tide_timeframe.")
+        raise ValueError("A DatetimeIndex is required when resampling Tide/Wave timeframes.")
     pandas_rule = _to_pandas_resample_rule(rule)
     return (
         candles.resample(pandas_rule, label="right", closed="right")
@@ -657,7 +772,24 @@ def _main() -> None:
     parser = argparse.ArgumentParser(description="Run GEO P Momentum signals on OHLCV CSV data.")
     parser.add_argument("csv", help="Input CSV with open, high, low, close, volume columns.")
     parser.add_argument("--time-column", default=None, help="Optional timestamp column to use as index.")
+    parser.add_argument(
+        "--timeframe-mode",
+        default="PDF Auto",
+        choices=["PDF Auto", "Manual"],
+        help="Use the PDF Tide/Wave hierarchy or only manually supplied timeframes.",
+    )
+    parser.add_argument(
+        "--chart-timeframe",
+        default=None,
+        help="Execution chart timeframe, for example 15. Used by PDF Auto when timestamps cannot be inferred.",
+    )
     parser.add_argument("--tide-timeframe", default=None, help="Optional tide timeframe, for example 60 or 1D.")
+    parser.add_argument("--wave-timeframe", default=None, help="Optional Line #2 wave timeframe, for example 60.")
+    parser.add_argument(
+        "--disable-line2-mtf-refinement",
+        action="store_true",
+        help="Disable the PDF Line #2 Tide/Wave refinement path.",
+    )
     parser.add_argument(
         "--signal-mode",
         default="Balanced",
@@ -679,7 +811,11 @@ def _main() -> None:
         frame = frame.set_index(args.time_column)
 
     cfg = GeoPMomentumConfig(
+        timeframe_mode=args.timeframe_mode,
+        chart_timeframe=args.chart_timeframe,
         tide_timeframe=args.tide_timeframe,
+        wave_timeframe=args.wave_timeframe,
+        use_line2_mtf_refinement=not args.disable_line2_mtf_refinement,
         signal_mode=args.signal_mode,
         min_better_confirmations=args.min_better_confirmations,
     )

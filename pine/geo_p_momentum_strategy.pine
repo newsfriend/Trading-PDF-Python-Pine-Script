@@ -9,7 +9,10 @@ strategy("GEO P Momentum Strategy", overlay=true, pyramiding=0, process_orders_o
 // entries/exits for historical testing.
 
 groupTf = "Timeframe"
-tideTfInput = input.timeframe("", "Tide timeframe, blank = chart", group=groupTf)
+timeframeMode = input.string("PDF Auto", "Timeframe mapping", options=["PDF Auto", "Manual"], group=groupTf)
+tideTfInput = input.timeframe("", "Manual Tide timeframe, blank = chart", group=groupTf)
+waveTfInput = input.timeframe("", "Manual Wave timeframe, blank = chart", group=groupTf)
+useLine2Mtf = input.bool(true, "Use PDF line 2 MTF refinement", group=groupTf)
 confirmOnClose = input.bool(true, "Signal only after candle close", group=groupTf)
 
 groupPdf = "PDF Setup"
@@ -54,6 +57,26 @@ f_recent(condition, bars) =>
     barsSince = ta.barssince(condition)
     not na(barsSince) and barsSince <= bars
 
+f_auto_wave_tf() =>
+    if timeframe.isintraday
+        timeframe.multiplier <= 3 ? "5" : timeframe.multiplier <= 5 ? "15" : timeframe.multiplier <= 15 ? "60" : timeframe.multiplier <= 60 ? "240" : "D"
+    else if timeframe.isdaily
+        "W"
+    else if timeframe.isweekly
+        "M"
+    else
+        timeframe.period
+
+f_auto_tide_tf() =>
+    if timeframe.isintraday
+        timeframe.multiplier <= 3 ? "15" : timeframe.multiplier <= 5 ? "60" : timeframe.multiplier <= 15 ? "240" : timeframe.multiplier <= 60 ? "D" : "W"
+    else if timeframe.isdaily
+        "M"
+    else if timeframe.isweekly
+        "M"
+    else
+        timeframe.period
+
 f_tide_values() =>
     basis = ta.sma(close, bbLength)
     deviation = bbMult * ta.stdev(close, bbLength)
@@ -61,15 +84,27 @@ f_tide_values() =>
     lowerBand = basis - deviation
     ti = ta.ema(close, tiFast) - ta.ema(close, tiSlow)
     rsiValue = ta.rsi(close, rsiLength)
-    tideBuy = (high >= upperBand or close >= basis) and ti > ti[1] and rsiValue > rsiLongBase
-    tideSell = (low <= lowerBand or close <= basis) and ti < ti[1] and rsiValue < rsiShortBase
-    [tideBuy, tideSell, ti]
+    tideBbuc = high >= upperBand
+    tideBbdc = low <= lowerBand
+    tideTiUp = ti > ti[1]
+    tideTiDown = ti < ti[1]
+    tideBuy = (tideBbuc or close >= basis) and tideTiUp and rsiValue > rsiLongBase
+    tideSell = (tideBbdc or close <= basis) and tideTiDown and rsiValue < rsiShortBase
+    [tideBuy, tideSell, ti, tideBbuc, tideBbdc, tideTiUp, tideTiDown, rsiValue]
 
-tideTf = tideTfInput == "" ? timeframe.period : tideTfInput
-[tideBuyOk, tideSellOk, tideTi] = request.security(syminfo.tickerid, tideTf, f_tide_values(), barmerge.gaps_off, barmerge.lookahead_off)
+f_wave_rsi() =>
+    ta.rsi(close, rsiLength)
 
-// Wave timeframe indicator values. Leaving Tide timeframe blank makes Tide and
-// Wave use the same chart candles.
+useAutoTf = timeframeMode == "PDF Auto"
+tideTf = useAutoTf ? f_auto_tide_tf() : tideTfInput == "" ? timeframe.period : tideTfInput
+waveTf = useAutoTf ? f_auto_wave_tf() : waveTfInput == "" ? timeframe.period : waveTfInput
+[tideBuyOk, tideSellOk, tideTi, tideBbucMtf, tideBbdcMtf, tideTiUpMtf, tideTiDownMtf, tideRsiMtf] = request.security(syminfo.tickerid, tideTf, f_tide_values(), barmerge.gaps_off, barmerge.lookahead_off)
+waveRsiMtf = request.security(syminfo.tickerid, waveTf, f_wave_rsi(), barmerge.gaps_off, barmerge.lookahead_off)
+line2BuySetup = useLine2Mtf and tideBbucMtf and tideTiUpMtf and (tideRsiMtf > rsiLongBase) and (waveRsiMtf > rsiLongBase)
+line2SellSetup = useLine2Mtf and tideBbdcMtf and tideTiDownMtf and (tideRsiMtf < rsiShortBase) and (waveRsiMtf < rsiShortBase)
+
+// Execution-chart values keep the full checklist responsive on the visible chart.
+// The separate Line #2 path above uses the PDF Tide/Wave hierarchy.
 bbBasis = ta.sma(close, bbLength)
 bbDev = bbMult * ta.stdev(close, bbLength)
 bbUpper = bbBasis + bbDev
@@ -184,11 +219,11 @@ betterBuyRows = (tideTi > 0 ? 1 : 0) + (rsiStrongBuy ? 1 : 0) + (close > ema50 ?
 betterSellRows = (tideTi < 0 ? 1 : 0) + (rsiStrongSell ? 1 : 0) + (close < ema50 ? 1 : 0) + (noImmediateSupport ? 1 : 0)
 requiredRows = signalMode == "Fast" ? 0 : signalMode == "Balanced" ? 3 : 5
 
-buySetup = tideBuyOk and rsiValue > rsiLongBase and waveBuyCore and pdfBuyRows >= requiredRows and betterBuyRows >= minBetterConfirmations
-sellSetup = tideSellOk and rsiValue < rsiShortBase and waveSellCore and pdfSellRows >= requiredRows and betterSellRows >= minBetterConfirmations
+pdfBuySetup = tideBuyOk and rsiValue > rsiLongBase and waveBuyCore and pdfBuyRows >= requiredRows and betterBuyRows >= minBetterConfirmations
+pdfSellSetup = tideSellOk and rsiValue < rsiShortBase and waveSellCore and pdfSellRows >= requiredRows and betterSellRows >= minBetterConfirmations
 confirmedBar = confirmOnClose ? barstate.isconfirmed : true
-buySignal = buySetup and not (buySetup[1] == true) and confirmedBar
-sellSignal = sellSetup and not (sellSetup[1] == true) and confirmedBar
+buySignal = ((pdfBuySetup and not (pdfBuySetup[1] == true)) or (line2BuySetup and not (line2BuySetup[1] == true))) and confirmedBar
+sellSignal = ((pdfSellSetup and not (pdfSellSetup[1] == true)) or (line2SellSetup and not (line2SellSetup[1] == true))) and confirmedBar
 
 // Strategy orders use the PDF stop/target wording. The signal-only indicator
 // does not apply this extra validation before showing labels.
