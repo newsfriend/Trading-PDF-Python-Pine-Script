@@ -19,6 +19,17 @@ class ElliottWaveConfig:
     pivot_left: int = 5
     pivot_right: int = 5
     max_swings: int = 45
+    correction_pattern: str = "A-B-C"
+    wave1_start_mode: str = "Important swing"
+    important_atr_length: int = 14
+    important_atr_multiple: float = 1.0
+    rsi_length: int = 14
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    oscillator_lookback: int = 100
+    important_lookback: int = 144
+    degree_retrace: float = 0.618
     wave2_min_retrace: float = 0.14
     wave2_max_time: float = 2.0
     wave3_min_extension: float = 1.618
@@ -26,6 +37,7 @@ class ElliottWaveConfig:
     wave4_max_retrace: float = 0.50
     wave5_min_extension: float = 1.27
     wave5_max_extension: float = 2.618
+    time_tolerance: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -36,6 +48,12 @@ class _Swing:
     confirmed_index: object
     price: float
     kind: int  # 1 = pivot high, -1 = pivot low
+    atr: float
+    macd_hist: float
+    rsi: float
+    macd_extreme: bool
+    important_extreme: bool
+    important_range: float
 
 
 def compute_elliott_waves(
@@ -44,7 +62,8 @@ def compute_elliott_waves(
     """Return OHLC data with Elliott Wave labels on confirmed swing pivots."""
 
     cfg = config or ElliottWaveConfig()
-    source = _normalize_ohlc(candles)
+    _validate_config(cfg)
+    source = _with_indicators(_normalize_ohlc(candles), cfg)
     pivots = _detect_pivots(source, cfg)
     swings = _build_swings(pivots, cfg.max_swings)
 
@@ -54,22 +73,33 @@ def compute_elliott_waves(
     result["ew_label"] = pd.Series(index=result.index, dtype="object")
     result["ew_phase"] = np.nan
     result["ew_cycle"] = np.nan
+    result["ew_correction_pattern"] = pd.Series(index=result.index, dtype="object")
     result["ew_rule_state"] = pd.Series(index=result.index, dtype="object")
     result["ew_rule_note"] = pd.Series(index=result.index, dtype="object")
+    result["ew_start_confirmed"] = pd.Series(index=result.index, dtype="object")
+    result["ew_wave_duration"] = np.nan
+    result["ew_time_ratio"] = np.nan
     result["ew_wave5_min_target"] = np.nan
     result["ew_wave5_max_target"] = np.nan
 
+    cycle_length = _cycle_length(cfg)
     for wave_index, swing in enumerate(swings):
-        phase = wave_index % 9
-        cycle = wave_index // 9
-        state, note = _rule_state(swings, wave_index, cfg)
+        phase = wave_index % cycle_length
+        cycle = wave_index // cycle_length
+        state, note, start_confirmed, duration, time_ratio = _rule_state(
+            swings, wave_index, cfg
+        )
         result.loc[swing.index, "ew_pivot"] = True
         result.loc[swing.index, "ew_confirmed_at"] = swing.confirmed_index
-        result.loc[swing.index, "ew_label"] = _phase_label(phase)
+        result.loc[swing.index, "ew_label"] = _phase_label(phase, cfg)
         result.loc[swing.index, "ew_phase"] = phase
         result.loc[swing.index, "ew_cycle"] = cycle
+        result.loc[swing.index, "ew_correction_pattern"] = cfg.correction_pattern
         result.loc[swing.index, "ew_rule_state"] = state
         result.loc[swing.index, "ew_rule_note"] = note
+        result.loc[swing.index, "ew_start_confirmed"] = start_confirmed
+        result.loc[swing.index, "ew_wave_duration"] = duration
+        result.loc[swing.index, "ew_time_ratio"] = time_ratio
 
         if phase == 4:
             min_target, max_target = _wave5_targets(swings, wave_index, cfg)
@@ -77,6 +107,19 @@ def compute_elliott_waves(
             result.loc[swing.index, "ew_wave5_max_target"] = max_target
 
     return result
+
+
+def _validate_config(cfg: ElliottWaveConfig) -> None:
+    valid_patterns = {"A-B-C", "W-X-Y", "W-X-Y-X-Z", "A-B-C-D-E"}
+    if cfg.correction_pattern not in valid_patterns:
+        raise ValueError(f"correction_pattern must be one of {sorted(valid_patterns)}")
+    valid_start_modes = {"Off", "Important swing", "Important swing + oscillator"}
+    if cfg.wave1_start_mode not in valid_start_modes:
+        raise ValueError(f"wave1_start_mode must be one of {sorted(valid_start_modes)}")
+    if cfg.important_lookback < 10:
+        raise ValueError("important_lookback must be at least 10 bars")
+    if cfg.degree_retrace <= 0:
+        raise ValueError("degree_retrace must be greater than 0")
 
 
 def _normalize_ohlc(candles: pd.DataFrame) -> pd.DataFrame:
@@ -88,15 +131,60 @@ def _normalize_ohlc(candles: pd.DataFrame) -> pd.DataFrame:
     return normalized.sort_index()
 
 
+def _with_indicators(source: pd.DataFrame, cfg: ElliottWaveConfig) -> pd.DataFrame:
+    enriched = source.copy()
+    close = enriched["close"].astype(float)
+    high = enriched["high"].astype(float)
+    low = enriched["low"].astype(float)
+
+    previous_close = close.shift(1)
+    true_range = pd.concat(
+        [(high - low).abs(), (high - previous_close).abs(), (low - previous_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    enriched["_ew_atr"] = _rma(true_range, cfg.important_atr_length)
+
+    change = close.diff()
+    gains = change.clip(lower=0.0)
+    losses = -change.clip(upper=0.0)
+    average_gain = _rma(gains, cfg.rsi_length)
+    average_loss = _rma(losses, cfg.rsi_length)
+    rs = average_gain / average_loss.replace(0.0, np.nan)
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    rsi = rsi.mask((average_loss == 0.0) & (average_gain > 0.0), 100.0)
+    rsi = rsi.mask((average_loss == 0.0) & (average_gain == 0.0), 50.0)
+    enriched["_ew_rsi"] = rsi
+
+    macd_line = _ema(close, cfg.macd_fast) - _ema(close, cfg.macd_slow)
+    signal_line = _ema(macd_line, cfg.macd_signal)
+    enriched["_ew_macd_hist"] = macd_line - signal_line
+    enriched["_ew_macd_lowest"] = enriched["_ew_macd_hist"] <= enriched["_ew_macd_hist"].rolling(
+        cfg.oscillator_lookback, min_periods=1
+    ).min()
+    enriched["_ew_macd_highest"] = enriched["_ew_macd_hist"] >= enriched["_ew_macd_hist"].rolling(
+        cfg.oscillator_lookback, min_periods=1
+    ).max()
+    return enriched
+
+
 def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]:
     highs = source["high"].astype(float).to_numpy()
     lows = source["low"].astype(float).to_numpy()
+    atr = source["_ew_atr"].astype(float).to_numpy()
+    macd_hist = source["_ew_macd_hist"].astype(float).to_numpy()
+    rsi = source["_ew_rsi"].astype(float).to_numpy()
+    macd_lowest = source["_ew_macd_lowest"].fillna(False).astype(bool).to_numpy()
+    macd_highest = source["_ew_macd_highest"].fillna(False).astype(bool).to_numpy()
     pivots: list[_Swing] = []
 
     for position in range(cfg.pivot_left, len(source) - cfg.pivot_right):
         confirmed_position = position + cfg.pivot_right
         high_window = highs[position - cfg.pivot_left : position + cfg.pivot_right + 1]
         low_window = lows[position - cfg.pivot_left : position + cfg.pivot_right + 1]
+        important_start = max(0, position - cfg.important_lookback + 1)
+        important_high = float(np.nanmax(highs[important_start : position + 1]))
+        important_low = float(np.nanmin(lows[important_start : position + 1]))
+        important_range = important_high - important_low
 
         if not np.isnan(high_window).any() and highs[position] == np.max(high_window):
             pivots.append(
@@ -107,6 +195,12 @@ def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]
                     source.index[confirmed_position],
                     float(highs[position]),
                     1,
+                    float(atr[position]),
+                    float(macd_hist[position]),
+                    float(rsi[position]),
+                    bool(macd_highest[position]),
+                    bool(highs[position] >= important_high),
+                    important_range,
                 )
             )
         if not np.isnan(low_window).any() and lows[position] == np.min(low_window):
@@ -118,6 +212,12 @@ def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]
                     source.index[confirmed_position],
                     float(lows[position]),
                     -1,
+                    float(atr[position]),
+                    float(macd_hist[position]),
+                    float(rsi[position]),
+                    bool(macd_lowest[position]),
+                    bool(lows[position] <= important_low),
+                    important_range,
                 )
             )
 
@@ -154,27 +254,36 @@ def _build_swings(pivots: list[_Swing], max_swings: int) -> list[_Swing]:
     return swings
 
 
-def _phase_label(phase: int) -> str:
-    return {
-        0: "0",
-        1: "1",
-        2: "2",
-        3: "3",
-        4: "4",
-        5: "5",
-        6: "(A)",
-        7: "(B)",
-        8: "(C)",
-    }[phase]
+def _cycle_length(cfg: ElliottWaveConfig) -> int:
+    if cfg.correction_pattern in {"W-X-Y-X-Z", "A-B-C-D-E"}:
+        return 11
+    return 9
+
+
+def _phase_label(phase: int, cfg: ElliottWaveConfig) -> str:
+    if phase <= 5:
+        return "0" if phase == 0 else str(phase)
+    correction_labels = {
+        "A-B-C": {6: "(A)", 7: "(B)", 8: "(C)"},
+        "W-X-Y": {6: "W", 7: "X", 8: "Y"},
+        "W-X-Y-X-Z": {6: "W", 7: "X", 8: "Y", 9: "X", 10: "Z"},
+        "A-B-C-D-E": {6: "(A)", 7: "(B)", 8: "(C)", 9: "(D)", 10: "(E)"},
+    }
+    return correction_labels[cfg.correction_pattern][phase]
 
 
 def _rule_state(
     swings: list[_Swing], wave_index: int, cfg: ElliottWaveConfig
-) -> tuple[str, str]:
-    phase = wave_index % 9
+) -> tuple[str, str, object, float, float]:
+    phase = wave_index % _cycle_length(cfg)
     cycle_start = wave_index - phase
+    duration = _wave_duration(swings, wave_index)
     if cycle_start < 0:
-        return "ok", ""
+        return "ok", "", None, duration, np.nan
+
+    if phase == 1 and wave_index >= 1:
+        confirmed, note = _wave1_start_state(swings, cycle_start, cfg)
+        return _state(False, not confirmed), note, confirmed, duration, np.nan
 
     if phase == 2 and wave_index >= 2:
         p0, p1, p2 = (swings[cycle_start + offset].price for offset in range(3))
@@ -187,22 +296,38 @@ def _rule_state(
         warning = retrace < cfg.wave2_min_retrace or time_ratio > cfg.wave2_max_time
         return _state(invalid, warning), (
             f"Wave 2 retrace={retrace:.2%}, time={time_ratio:.2f}x Wave 1"
-        )
+        ), None, duration, time_ratio
 
     if phase == 3 and wave_index >= 3:
         p0, p1, p2, p3 = (swings[cycle_start + offset].price for offset in range(4))
+        t0, t1, t2, t3 = (swings[cycle_start + offset].position for offset in range(4))
         ratio = _safe_ratio(abs(p3 - p2), abs(p1 - p0))
-        return _state(False, ratio < cfg.wave3_min_extension), (
-            f"Wave 3={ratio:.2%} of Wave 1"
-        )
+        time1 = max(1, t1 - t0)
+        time2 = max(1, t2 - t1)
+        time3 = max(1, t3 - t2)
+        equal12 = abs(time1 - time2) <= time1 * 0.05
+        expected3 = time1 + time2 if equal12 else (time1 + time2) / 2.0
+        time_ratio = _safe_ratio(time3, expected3)
+        time_warning = abs(time_ratio - 1.0) > cfg.time_tolerance
+        warning = ratio < cfg.wave3_min_extension or time_warning
+        return _state(False, warning), (
+            f"Wave 3={ratio:.2%} of Wave 1, time={time3} bars vs rule {expected3:.2f}"
+        ), None, duration, time_ratio
 
     if phase == 4 and wave_index >= 4:
         p1, p2, p3, p4 = (swings[cycle_start + offset].price for offset in range(1, 5))
+        t1, t2, t3, t4 = (swings[cycle_start + offset].position for offset in range(1, 5))
         bullish = p3 > p2
         retrace = _safe_ratio(abs(p3 - p4), abs(p3 - p2))
+        time2 = max(1, t2 - t1)
+        time4 = max(1, t4 - t3)
+        time_ratio = _safe_ratio(time4, time2)
+        time_warning = not _near_any(time_ratio, (0.5, 2.0, 3.0), cfg.time_tolerance)
         invalid = p4 <= p1 if bullish else p4 >= p1
-        warning = retrace < cfg.wave4_min_retrace or retrace > cfg.wave4_max_retrace
-        return _state(invalid, warning), f"Wave 4 retrace={retrace:.2%}"
+        warning = retrace < cfg.wave4_min_retrace or retrace > cfg.wave4_max_retrace or time_warning
+        return _state(invalid, warning), (
+            f"Wave 4 retrace={retrace:.2%}, time={time_ratio:.2f}x W2, correction={cfg.correction_pattern}"
+        ), None, duration, time_ratio
 
     if phase == 5 and wave_index >= 5:
         p0, p1, p2, p3, p4, p5 = (
@@ -214,15 +339,69 @@ def _rule_state(
         ratio = _safe_ratio(wave5, abs(p3 - p4))
         invalid = wave3 < wave1 and wave3 < wave5
         warning = ratio < cfg.wave5_min_extension or ratio > cfg.wave5_max_extension
-        return _state(invalid, warning), f"Wave 5={ratio:.2%} of Wave 3-4"
+        return _state(invalid, warning), f"Wave 5={ratio:.2%} of Wave 3-4", None, duration, np.nan
 
-    return "ok", ""
+    return "ok", "", None, duration, np.nan
+
+
+def _wave1_start_state(
+    swings: list[_Swing], cycle_start: int, cfg: ElliottWaveConfig
+) -> tuple[bool, str]:
+    if cfg.wave1_start_mode == "Off" or cycle_start + 1 >= len(swings):
+        return True, ""
+
+    start = swings[cycle_start]
+    wave1 = swings[cycle_start + 1]
+    distance = abs(wave1.price - start.price)
+    degree_ok = np.isfinite(start.important_range) and start.important_range > 0 and distance >= start.important_range * cfg.degree_retrace
+    atr_ok = cfg.important_atr_multiple <= 0 or (
+        np.isfinite(start.atr) and distance >= start.atr * cfg.important_atr_multiple
+    )
+    important_ok = bool(start.important_extreme and degree_ok and atr_ok)
+    previous = _previous_same_type_swing(swings, cycle_start, start.kind)
+    divergence_ok = False
+    if previous is not None:
+        bullish_start = wave1.price > start.price
+        price_extends = start.price < previous.price if bullish_start else start.price > previous.price
+        rsi_diverges = start.rsi > previous.rsi if bullish_start else start.rsi < previous.rsi
+        macd_diverges = start.macd_hist > previous.macd_hist if bullish_start else start.macd_hist < previous.macd_hist
+        divergence_ok = bool(price_extends and (rsi_diverges or macd_diverges))
+
+    oscillator_ok = bool(start.macd_extreme or divergence_ok)
+    confirmed = important_ok
+    if cfg.wave1_start_mode == "Important swing + oscillator":
+        confirmed = important_ok and oscillator_ok
+
+    note = (
+        "Wave 1 start: Important H/L "
+        f"{'OK' if start.important_extreme else 'no'}, degree "
+        f"{'OK' if degree_ok else 'no'}, ATR swing "
+        f"{'OK' if atr_ok else 'weak'}, MACD extreme "
+        f"{'OK' if start.macd_extreme else 'no'}, RSI/MACD divergence "
+        f"{'OK' if divergence_ok else 'no'}"
+    )
+    return bool(confirmed), note
+
+
+def _previous_same_type_swing(
+    swings: list[_Swing], index: int, kind: int
+) -> _Swing | None:
+    for candidate in reversed(swings[:index]):
+        if candidate.kind == kind:
+            return candidate
+    return None
+
+
+def _wave_duration(swings: list[_Swing], wave_index: int) -> float:
+    if wave_index <= 0:
+        return np.nan
+    return float(max(1, swings[wave_index].position - swings[wave_index - 1].position))
 
 
 def _wave5_targets(
     swings: list[_Swing], wave_index: int, cfg: ElliottWaveConfig
 ) -> tuple[float, float]:
-    cycle_start = wave_index - (wave_index % 9)
+    cycle_start = wave_index - (wave_index % _cycle_length(cfg))
     if cycle_start < 0 or cycle_start + 4 >= len(swings):
         return np.nan, np.nan
     p3 = swings[cycle_start + 3].price
@@ -241,7 +420,36 @@ def _state(invalid: bool, warning: bool) -> str:
     return "ok"
 
 
+
+def _near_any(value: float, targets: tuple[float, ...], tolerance: float) -> bool:
+    if np.isnan(value):
+        return False
+    return any(abs(value - target) <= tolerance for target in targets)
 def _safe_ratio(numerator: float, denominator: float) -> float:
     if denominator == 0 or np.isnan(denominator):
         return np.nan
     return numerator / denominator
+
+
+def _ema(series: pd.Series, length: int) -> pd.Series:
+    return series.astype(float).ewm(span=length, adjust=False).mean()
+
+
+def _rma(series: pd.Series, length: int) -> pd.Series:
+    values = series.astype(float).to_numpy()
+    output = np.full(len(values), np.nan, dtype=float)
+    if len(values) < length:
+        return pd.Series(output, index=series.index)
+
+    initial = np.nanmean(values[:length])
+    output[length - 1] = initial
+    for position in range(length, len(values)):
+        previous = output[position - 1]
+        current = values[position]
+        if np.isnan(previous):
+            output[position] = current
+        elif np.isnan(current):
+            output[position] = previous
+        else:
+            output[position] = (previous * (length - 1) + current) / length
+    return pd.Series(output, index=series.index)

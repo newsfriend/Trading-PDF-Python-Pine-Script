@@ -1,0 +1,15 @@
+Yes. In the current Swing code, these candlestick patterns are being used.
+
+Bullish reversal patterns for Swing BUY: Hammer, Inverted Hammer, Bullish Spinning Top, Bullish Marubozu, Bullish Kicker, Bullish Engulfing, Piercing Line, Tweezer Bottom, Bullish Harami, Morning Star, and Dragonfly Doji.
+
+Bearish reversal patterns for Swing SELL: Hanging Man, Bearish Spinning Top, Bearish Marubozu, Bearish Kicker, Bearish Engulfing, Dark Cloud Cover, Tweezer Top, Bearish Harami, Gravestone Doji, Hammer at High, plus the Swing-only Evening Star that we added separately.
+
+One important thing: for Swing, these patterns are not accepted anywhere on the chart. They are only valid inside the BKP/BKT context:
+
+BUY candle → BKP window + support context
+SELL candle → BKT window + resistance context
+Evening Star is also restricted to that Swing resistance/BKT context.
+
+Plain Doji stays neutral; Dragonfly/Gravestone only become directional when the proper reversal context exists.
+
+So effectively we are using 11 bullish + 11 bearish confirmations for Swing now, counting Evening Star on the bearish side.

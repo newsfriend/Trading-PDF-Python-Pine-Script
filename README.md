@@ -17,9 +17,9 @@ matching entry/exit signals.
 
 - `pine/geo_p_momentum_strategy.pine` - Main TradingView Pine v6 strategy with entries, exits, BUY/SELL markers, alerts, stop, and target validation.
 - `pine/geo_p_momentum.pine` - Signal-only TradingView Pine v6 indicator for clients who only want BUY/SELL markers and alerts without stop/target validation hiding labels.
-- `pine/elliott_wave_notes.pine` - Elliott Wave notes overlay with swing labels, connecting lines, rule warnings, and Wave 5 target zone.
+- `pine/elliott_wave_notes.pine` - Elliott Wave notes overlay with swing labels, connecting lines, Wave 1 start checks, correction-pattern labels, time-rule table, rule warnings, and Wave 5 target zone.
 - `python/geo_p_momentum.py` - Matching Python signal engine and simple target-1 backtest helper.
-- `python/elliott_wave_notes.py` - Matching Python Elliott Wave swing/label engine.
+- `python/elliott_wave_notes.py` - Matching Python Elliott Wave swing/label engine with Wave 1 start notes, correction labels, and timing columns.
 - `python/__init__.py` - Package export.
 - `docs/geo_p_momentum_pdf_rules.md` - Row-by-row extraction of the first PDF checklist.
 - `docs/elliott_wave_notes_rules.md` - Elliott Wave rule extraction and implementation notes.
@@ -64,6 +64,17 @@ Use `Manual` mode only when the client wants to override the PDF hierarchy.
 The `Use PDF line 2 MTF refinement` input keeps this as an additional trigger
 beside the full checklist signal, so Case 1 can remain unchanged while Case 2
 and Case 3 can be caught from the Tide/Wave rule.
+
+## Elliott Wave Overlay
+
+The Elliott Wave script is separate from the GEO BUY/SELL strategy. It draws the
+wave structure from the Elliott Wave PDFs and the reference chart.
+
+Wave 1 is anchored from Important High/Low pivots using the configurable 144-bar lookback and 61.8% degree-development rule from the notes. MACD lowest low/high and RSI or MACD divergence are used as confirmation notes, not as the only trigger for starting Wave 1. This avoids forcing a new impulse too early when price is still extending a complex correction such as a `Z` wave.
+
+The correction labels are configurable. Use `A-B-C` for a simple correction,
+`W-X-Y` or `W-X-Y-X-Z` for double/triple corrections, and `A-B-C-D-E` for a
+triangle-style correction. The Pine overlay also shows a visible time-rule table for Wave 2, Wave 3, and Wave 4 timing rules from the notes.
 
 ## Buy Side
 
@@ -191,8 +202,17 @@ Elliott Wave overlay data:
 ```python
 from python.elliott_wave_notes import ElliottWaveConfig, compute_elliott_waves
 
-ew = compute_elliott_waves(df, ElliottWaveConfig(pivot_left=5, pivot_right=5))
-print(ew[ew["ew_pivot"]][["ew_label", "ew_rule_state", "ew_rule_note"]])
+ew = compute_elliott_waves(
+    df,
+    ElliottWaveConfig(
+        pivot_left=5,
+        pivot_right=5,
+        correction_pattern="W-X-Y-X-Z",
+        important_lookback=144,
+        degree_retrace=0.618,
+    ),
+)
+print(ew[ew["ew_pivot"]][["ew_label", "ew_rule_state", "ew_rule_note", "ew_time_ratio"]])
 ```
 
 Or run as a CLI:

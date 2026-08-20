@@ -1,0 +1,79 @@
+In trading, a Liquidity Sweep occurs when price temporarily moves beyond an obvious swing high or swing low to trigger stop-loss orders and pending liquidity, but then quickly returns and closes back inside the previous range.
+
+For our trading setup, the logic should be:
+
+Bullish Liquidity Sweep
+
+A bullish liquidity sweep occurs when:
+
+Price moves below a previous confirmed Swing Low or Support level.
+The candle forms a wick below that level.
+The candle then closes back above the Swing Low.
+Preferably, the sweep occurs with strong or above-average volume.
+It should happen near a valid support or BKP area.
+A bullish reversal candlestick pattern provides additional confirmation.
+
+When these conditions are satisfied, the chart can display:
+
+SWEEP L
+
+This indicates that liquidity below the previous low has been taken and price has rejected the lower level.
+
+Bearish Liquidity Sweep
+
+A bearish liquidity sweep occurs when:
+
+Price moves above a previous confirmed Swing High or Resistance level.
+The candle forms a wick above that level.
+The candle then closes back below the Swing High.
+Preferably, the sweep occurs with strong or above-average volume.
+It should happen near a valid resistance or BKT area.
+A bearish reversal candlestick pattern provides additional confirmation.
+
+When these conditions are satisfied, the chart can display:
+
+SWEEP H
+
+This indicates that liquidity above the previous high has been taken and price has rejected the higher level.
+
+Liquidity Sweep vs Genuine Breakout
+
+A Liquidity Sweep means:
+
+Level Break → Wick Outside the Level → Candle Closes Back Inside
+
+This represents rejection and may indicate a possible reversal.
+
+A Genuine Breakout or Liquidity Clearance means:
+
+Level Break → Candle Closes Outside the Level → Follow-through Continues Outside
+
+This means the market has genuinely broken the liquidity level rather than only sweeping it.
+
+For a confirmed upside break:
+
+LIQ H CLEARED
+
+For a confirmed downside break:
+
+LIQ L CLEARED
+
+The Pine Script logic can therefore follow these basic conditions:
+
+Bullish Sweep
+Low < Previous Confirmed Dow Swing Low
+AND
+Close > Previous Swing Low
+
+→ SWEEP L
+
+Bearish Sweep
+High > Previous Confirmed Dow Swing High
+AND
+Close < Previous Swing High
+
+→ SWEEP H
+
+A liquidity sweep should not be treated as a standalone BUY or SELL signal. It should act as a confirmation or setup-strength upgrade for existing setups such as Momentum, Swing, FBO/FBD, Double Bottom/Double Top, or Triangle setups.
+
+Also, every wick beyond a swing level should not automatically be considered a liquidity sweep. The sweep should preferably be validated using confirmed Dow Theory swings, Support/Resistance, candle-close confirmation, volume, and reversal candlestick context.
