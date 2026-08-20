@@ -14,6 +14,8 @@ groupSwing = "Swing Detection"
 pivotLeft = input.int(5, "Pivot left", minval=1, group=groupSwing)
 pivotRight = input.int(5, "Pivot right", minval=1, group=groupSwing)
 maxSwings = input.int(45, "Maximum swings to draw", minval=9, maxval=120, group=groupSwing)
+minSwingAtrMultiple = input.float(1.5, "Minimum swing ATR multiple", minval=0.0, step=0.1, group=groupSwing)
+minSwingRangePct = input.float(3.0, "Minimum swing % of Important H/L", minval=0.0, step=0.1, group=groupSwing) / 100.0
 showZero = input.bool(false, "Show 0 labels", group=groupSwing)
 
 groupStart = "Wave 1 Start"
@@ -41,6 +43,7 @@ timeTolerance = input.float(25.0, "Time rule tolerance %", minval=0.0, step=1.0,
 
 groupDisplay = "Display"
 correctionPattern = input.string("A-B-C", "Correction labels", options=["A-B-C", "W-X-Y", "W-X-Y-X-Z", "A-B-C-D-E"], group=groupDisplay)
+countDisplayMode = input.string("Validated Anchor", "Count mode", options=["Validated Anchor", "All swings"], group=groupDisplay)
 showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
 showTimeTable = input.bool(true, "Show time rules table", group=groupDisplay)
 impulseLineColor = input.color(color.rgb(255, 128, 0), "Impulse line", group=groupDisplay)
@@ -108,7 +111,7 @@ f_previous_same_type_index(index, pivotType) =>
 
 f_start_confirmation_note(cycleStart) =>
     note = ""
-    startOk = true
+    startOk = wave1StartMode == "Off"
     if wave1StartMode != "Off" and array.size(swingPrices) > cycleStart + 1
         p0 = array.get(swingPrices, cycleStart)
         p1 = array.get(swingPrices, cycleStart + 1)
@@ -138,6 +141,30 @@ f_start_confirmation_note(cycleStart) =>
         startOk := wave1StartMode == "Important swing" ? importantOk : importantOk and oscillatorOk
         note := "Wave 1 start: Important H/L " + (importantExtremeOk ? "OK" : "no") + ", degree " + (degreeOk ? "OK" : "no") + ", ATR swing " + (atrOk ? "OK" : "weak") + ", MACD extreme " + (macdExtremeOk ? "OK" : "no") + ", RSI/MACD divergence " + (divergenceOk ? "OK" : "no")
     [startOk, note]
+
+f_valid_anchor_index(index) =>
+    anchor = -1
+    if countDisplayMode == "All swings"
+        anchor := 0
+    else if index >= 0
+        for j = 0 to index
+            [startOk, anchorNote] = f_start_confirmation_note(j)
+            if startOk
+                anchor := j
+    anchor
+
+f_wave_phase(index) =>
+    if countDisplayMode == "All swings"
+        f_phase(index)
+    else
+        anchor = f_valid_anchor_index(index)
+        anchor >= 0 ? (index - anchor) % f_cycle_length() : -1
+
+f_passes_swing_filter(pivotPrice, lastPrice, pivotAtr, pivotImportantRange) =>
+    distance = math.abs(pivotPrice - lastPrice)
+    minByAtr = minSwingAtrMultiple > 0 and not na(pivotAtr) ? pivotAtr * minSwingAtrMultiple : 0.0
+    minByRange = minSwingRangePct > 0 and not na(pivotImportantRange) ? pivotImportantRange * minSwingRangePct : 0.0
+    distance >= math.max(minByAtr, minByRange)
 
 f_upsert_swing(pivotBar, pivotPrice, pivotType, pivotAtr, pivotMacdHist, pivotRsi, pivotMacdExtreme, pivotImportantExtreme, pivotImportantRange) =>
     changed = false
@@ -169,7 +196,7 @@ f_upsert_swing(pivotBar, pivotPrice, pivotType, pivotAtr, pivotMacdHist, pivotRs
                 array.set(swingImportantExtreme, count - 1, pivotImportantExtreme)
                 array.set(swingImportantRange, count - 1, pivotImportantRange)
                 changed := true
-        else
+        else if f_passes_swing_filter(pivotPrice, lastPrice, pivotAtr, pivotImportantRange)
             array.push(swingBars, pivotBar)
             array.push(swingPrices, pivotPrice)
             array.push(swingTypes, pivotType)
@@ -285,7 +312,7 @@ f_latest_time_note() =>
         searchLimit = int(math.min(count - 3, 120))
         for offset = 0 to searchLimit
             i = latest - offset
-            phase = f_phase(i)
+            phase = f_wave_phase(i)
             if phase >= 2 and note == "Waiting for Wave 2"
                 cycleStart = i - phase
                 if cycleStart >= 0 and array.size(swingBars) > cycleStart + 2
@@ -363,21 +390,25 @@ f_redraw() =>
             b = array.get(swingBars, i)
             p = array.get(swingPrices, i)
             t = array.get(swingTypes, i)
-            phase = f_phase(i)
-            if i > 0
-                prevBar = array.get(swingBars, i - 1)
-                prevPrice = array.get(swingPrices, i - 1)
-                lineColor = phase <= 5 ? impulseLineColor : correctionLineColor
-                ln = line.new(prevBar, prevPrice, b, p, color=lineColor, width=2)
-                array.push(drawnLines, ln)
-            if showZero or phase != 0
-                [hardInvalid, softWarn, note] = f_rule_state(i, phase)
-                style = t == 1 ? label.style_label_down : label.style_label_up
-                lbl = label.new(b, p, text=f_phase_text(phase), style=style, yloc=yloc.price, color=f_label_color(phase, hardInvalid, softWarn), textcolor=labelTextColor, size=f_label_size(), tooltip=note)
-                array.push(drawnLabels, lbl)
-            if phase == 4
-                f_draw_wave5_targets(i - phase)
-
+            phase = f_wave_phase(i)
+            cycleStart = phase >= 0 ? i - phase : -1
+            if phase >= 0
+                if i > 0
+                    prevPhase = f_wave_phase(i - 1)
+                    prevCycleStart = prevPhase >= 0 ? (i - 1) - prevPhase : -1
+                    if prevPhase >= 0 and prevCycleStart == cycleStart
+                        prevBar = array.get(swingBars, i - 1)
+                        prevPrice = array.get(swingPrices, i - 1)
+                        lineColor = phase <= 5 ? impulseLineColor : correctionLineColor
+                        ln = line.new(prevBar, prevPrice, b, p, color=lineColor, width=2)
+                        array.push(drawnLines, ln)
+                if showZero or phase != 0
+                    [hardInvalid, softWarn, note] = f_rule_state(i, phase)
+                    style = t == 1 ? label.style_label_down : label.style_label_up
+                    lbl = label.new(b, p, text=f_phase_text(phase), style=style, yloc=yloc.price, color=f_label_color(phase, hardInvalid, softWarn), textcolor=labelTextColor, size=f_label_size(), tooltip=note)
+                    array.push(drawnLabels, lbl)
+                if phase == 4
+                    f_draw_wave5_targets(cycleStart)
 pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
 pivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
 pivotBar = bar_index - pivotRight

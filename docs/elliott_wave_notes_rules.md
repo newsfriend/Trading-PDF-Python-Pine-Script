@@ -33,6 +33,22 @@ The correction sequence is configurable from the Pine input and Python config:
 This keeps the overlay usable when Wave 4 or the larger correction is not a
 simple ABC and extends into a double/triple correction or triangle.
 
+
+## Marked Chart Refinement
+
+The marked TradingView snapshot showed that a raw ZigZag count can label every
+local swing as a new `1-2-3-4-5` sequence. That is useful for debugging but too
+noisy for the main Elliott Wave view.
+
+The Pine and Python versions now default to `Validated Anchor` mode. In this
+mode, labels are anchored from a confirmed Wave 1 start that passes the
+Important High/Low, 61.8% degree-development, and swing-quality checks. Smaller
+local swings are filtered with configurable ATR and Important High/Low range
+thresholds before they can become wave pivots.
+
+`All swings` mode is still available when the client wants to inspect lower
+sub-degree pivots, but it is no longer the default presentation mode.
+
 ## Wave 1 Start Logic
 
 Wave 1 does not start only because MACD makes a lowest low or RSI diverges. The

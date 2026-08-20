@@ -74,7 +74,7 @@ Wave 1 is anchored from Important High/Low pivots using the configurable 144-bar
 
 The correction labels are configurable. Use `A-B-C` for a simple correction,
 `W-X-Y` or `W-X-Y-X-Z` for double/triple corrections, and `A-B-C-D-E` for a
-triangle-style correction. The Pine overlay also shows a visible time-rule table for Wave 2, Wave 3, and Wave 4 timing rules from the notes.
+triangle-style correction. The default `Validated Anchor` count mode filters the marked chart problem where every local ZigZag swing was being promoted into a fresh wave count. Switch to `All swings` only when lower-degree debugging is needed. The Pine overlay also shows a visible time-rule table for Wave 2, Wave 3, and Wave 4 timing rules from the notes.
 
 ## Buy Side
 
@@ -208,6 +208,9 @@ ew = compute_elliott_waves(
         pivot_left=5,
         pivot_right=5,
         correction_pattern="W-X-Y-X-Z",
+        count_mode="Validated Anchor",
+        min_swing_atr_multiple=1.5,
+        min_swing_range_pct=0.03,
         important_lookback=144,
         degree_retrace=0.618,
     ),

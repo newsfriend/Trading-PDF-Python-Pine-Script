@@ -19,7 +19,10 @@ class ElliottWaveConfig:
     pivot_left: int = 5
     pivot_right: int = 5
     max_swings: int = 45
+    min_swing_atr_multiple: float = 1.5
+    min_swing_range_pct: float = 0.03
     correction_pattern: str = "A-B-C"
+    count_mode: str = "Validated Anchor"
     wave1_start_mode: str = "Important swing"
     important_atr_length: int = 14
     important_atr_multiple: float = 1.0
@@ -65,7 +68,7 @@ def compute_elliott_waves(
     _validate_config(cfg)
     source = _with_indicators(_normalize_ohlc(candles), cfg)
     pivots = _detect_pivots(source, cfg)
-    swings = _build_swings(pivots, cfg.max_swings)
+    swings = _build_swings(pivots, cfg)
 
     result = source.copy()
     result["ew_pivot"] = False
@@ -84,10 +87,13 @@ def compute_elliott_waves(
 
     cycle_length = _cycle_length(cfg)
     for wave_index, swing in enumerate(swings):
-        phase = wave_index % cycle_length
-        cycle = wave_index // cycle_length
+        phase = _phase_for_index(swings, wave_index, cfg)
+        if phase is None:
+            continue
+        cycle_start = wave_index - phase
+        cycle = cycle_start // cycle_length
         state, note, start_confirmed, duration, time_ratio = _rule_state(
-            swings, wave_index, cfg
+            swings, wave_index, cfg, phase, cycle_start
         )
         result.loc[swing.index, "ew_pivot"] = True
         result.loc[swing.index, "ew_confirmed_at"] = swing.confirmed_index
@@ -116,6 +122,9 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
     valid_start_modes = {"Off", "Important swing", "Important swing + oscillator"}
     if cfg.wave1_start_mode not in valid_start_modes:
         raise ValueError(f"wave1_start_mode must be one of {sorted(valid_start_modes)}")
+    valid_count_modes = {"Validated Anchor", "All swings"}
+    if cfg.count_mode not in valid_count_modes:
+        raise ValueError(f"count_mode must be one of {sorted(valid_count_modes)}")
     if cfg.important_lookback < 10:
         raise ValueError("important_lookback must be at least 10 bars")
     if cfg.degree_retrace <= 0:
@@ -225,7 +234,7 @@ def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]
     return pivots
 
 
-def _build_swings(pivots: list[_Swing], max_swings: int) -> list[_Swing]:
+def _build_swings(pivots: list[_Swing], cfg: ElliottWaveConfig) -> list[_Swing]:
     swings: list[_Swing] = []
 
     for pivot in pivots:
@@ -245,20 +254,48 @@ def _build_swings(pivots: list[_Swing], max_swings: int) -> list[_Swing]:
             more_extreme = pivot.price > last.price if pivot.kind == 1 else pivot.price < last.price
             if more_extreme:
                 swings[-1] = pivot
-        else:
+        elif _passes_swing_filter(pivot, last, cfg):
             swings.append(pivot)
 
-        if len(swings) > max_swings:
-            swings = swings[-max_swings:]
+        if len(swings) > cfg.max_swings:
+            swings = swings[-cfg.max_swings:]
 
     return swings
 
+
+def _passes_swing_filter(pivot: _Swing, last: _Swing, cfg: ElliottWaveConfig) -> bool:
+    distance = abs(pivot.price - last.price)
+    min_by_atr = pivot.atr * cfg.min_swing_atr_multiple if np.isfinite(pivot.atr) else 0.0
+    min_by_range = pivot.important_range * cfg.min_swing_range_pct if np.isfinite(pivot.important_range) else 0.0
+    return distance >= max(min_by_atr, min_by_range)
 
 def _cycle_length(cfg: ElliottWaveConfig) -> int:
     if cfg.correction_pattern in {"W-X-Y-X-Z", "A-B-C-D-E"}:
         return 11
     return 9
 
+
+def _phase_for_index(
+    swings: list[_Swing], wave_index: int, cfg: ElliottWaveConfig
+) -> int | None:
+    cycle_length = _cycle_length(cfg)
+    if cfg.count_mode == "All swings":
+        return wave_index % cycle_length
+    anchor = _valid_anchor_index(swings, wave_index, cfg)
+    if anchor is None:
+        return None
+    return (wave_index - anchor) % cycle_length
+
+
+def _valid_anchor_index(
+    swings: list[_Swing], wave_index: int, cfg: ElliottWaveConfig
+) -> int | None:
+    anchor = None
+    for candidate in range(wave_index + 1):
+        confirmed, _ = _wave1_start_state(swings, candidate, cfg)
+        if confirmed:
+            anchor = candidate
+    return anchor
 
 def _phase_label(phase: int, cfg: ElliottWaveConfig) -> str:
     if phase <= 5:
@@ -273,10 +310,8 @@ def _phase_label(phase: int, cfg: ElliottWaveConfig) -> str:
 
 
 def _rule_state(
-    swings: list[_Swing], wave_index: int, cfg: ElliottWaveConfig
+    swings: list[_Swing], wave_index: int, cfg: ElliottWaveConfig, phase: int, cycle_start: int
 ) -> tuple[str, str, object, float, float]:
-    phase = wave_index % _cycle_length(cfg)
-    cycle_start = wave_index - phase
     duration = _wave_duration(swings, wave_index)
     if cycle_start < 0:
         return "ok", "", None, duration, np.nan
@@ -347,8 +382,10 @@ def _rule_state(
 def _wave1_start_state(
     swings: list[_Swing], cycle_start: int, cfg: ElliottWaveConfig
 ) -> tuple[bool, str]:
-    if cfg.wave1_start_mode == "Off" or cycle_start + 1 >= len(swings):
+    if cfg.wave1_start_mode == "Off":
         return True, ""
+    if cycle_start + 1 >= len(swings):
+        return False, "Wave 1 start: waiting for next pivot"
 
     start = swings[cycle_start]
     wave1 = swings[cycle_start + 1]
@@ -401,7 +438,10 @@ def _wave_duration(swings: list[_Swing], wave_index: int) -> float:
 def _wave5_targets(
     swings: list[_Swing], wave_index: int, cfg: ElliottWaveConfig
 ) -> tuple[float, float]:
-    cycle_start = wave_index - (wave_index % _cycle_length(cfg))
+    phase = _phase_for_index(swings, wave_index, cfg)
+    if phase is None:
+        return np.nan, np.nan
+    cycle_start = wave_index - phase
     if cycle_start < 0 or cycle_start + 4 >= len(swings):
         return np.nan, np.nan
     p3 = swings[cycle_start + 3].price
@@ -425,6 +465,7 @@ def _near_any(value: float, targets: tuple[float, ...], tolerance: float) -> boo
     if np.isnan(value):
         return False
     return any(abs(value - target) <= tolerance for target in targets)
+
 def _safe_ratio(numerator: float, denominator: float) -> float:
     if denominator == 0 or np.isnan(denominator):
         return np.nan
