@@ -1,0 +1,215 @@
+//@version=6
+indicator("Elliott Wave Notes Overlay", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// Source notes:
+// - EW Notes / Chartking material
+// - EWT cheat sheet
+// - Rules & Guidelines Summary EW Theory
+// - Time analysis notes
+//
+// The PDFs are reference material. This script turns the written rules into a
+// deterministic ZigZag-style wave overlay with labels and rule warnings.
+
+groupSwing = "Swing Detection"
+pivotLeft = input.int(5, "Pivot left", minval=1, group=groupSwing)
+pivotRight = input.int(5, "Pivot right", minval=1, group=groupSwing)
+maxSwings = input.int(45, "Maximum swings to draw", minval=9, maxval=120, group=groupSwing)
+showZero = input.bool(false, "Show 0 labels", group=groupSwing)
+
+groupRules = "EW Notes Rules"
+showRuleWarnings = input.bool(true, "Color rule warnings", group=groupRules)
+wave2MinRetrace = input.float(14.0, "Wave 2 minimum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
+wave2MaxTime = input.float(2.0, "Wave 2 maximum time x Wave 1", minval=0.1, step=0.1, group=groupRules)
+wave3MinExtension = input.float(161.8, "Wave 3 expected minimum % of Wave 1", minval=1.0, step=0.1, group=groupRules) / 100.0
+wave4MinRetrace = input.float(14.0, "Wave 4 minimum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
+wave4MaxRetrace = input.float(50.0, "Wave 4 usual maximum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
+wave5MinExtension = input.float(127.0, "Wave 5 minimum % of Wave 3-4", minval=1.0, step=0.1, group=groupRules) / 100.0
+wave5MaxExtension = input.float(261.8, "Wave 5 maximum % of Wave 3-4", minval=1.0, step=0.1, group=groupRules) / 100.0
+
+groupDisplay = "Display"
+showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
+impulseLineColor = input.color(color.rgb(255, 128, 0), "Impulse line", group=groupDisplay)
+correctionLineColor = input.color(color.rgb(0, 160, 160), "Correction line", group=groupDisplay)
+labelTextColor = input.color(color.white, "Label text", group=groupDisplay)
+labelSizeInput = input.string("small", "Label size", options=["tiny", "small", "normal"], group=groupDisplay)
+
+var swingBars = array.new_int()
+var swingPrices = array.new_float()
+var swingTypes = array.new_int()
+var drawnLines = array.new_line()
+var drawnLabels = array.new_label()
+var targetLines = array.new_line()
+
+f_label_size() =>
+    labelSizeInput == "tiny" ? size.tiny : labelSizeInput == "normal" ? size.normal : size.small
+
+f_phase(index) =>
+    index % 9
+
+f_phase_text(phase) =>
+    phase == 0 ? "0" : phase == 1 ? "1" : phase == 2 ? "2" : phase == 3 ? "3" : phase == 4 ? "4" : phase == 5 ? "5" : phase == 6 ? "(A)" : phase == 7 ? "(B)" : "(C)"
+
+f_clear_drawings() =>
+    if array.size(drawnLines) > 0
+        for i = 0 to array.size(drawnLines) - 1
+            line.delete(array.get(drawnLines, i))
+    if array.size(drawnLabels) > 0
+        for i = 0 to array.size(drawnLabels) - 1
+            label.delete(array.get(drawnLabels, i))
+    if array.size(targetLines) > 0
+        for i = 0 to array.size(targetLines) - 1
+            line.delete(array.get(targetLines, i))
+    array.clear(drawnLines)
+    array.clear(drawnLabels)
+    array.clear(targetLines)
+
+f_upsert_swing(pivotBar, pivotPrice, pivotType) =>
+    changed = false
+    count = array.size(swingBars)
+    if count == 0
+        array.push(swingBars, pivotBar)
+        array.push(swingPrices, pivotPrice)
+        array.push(swingTypes, pivotType)
+        changed := true
+    else
+        lastType = array.get(swingTypes, count - 1)
+        lastPrice = array.get(swingPrices, count - 1)
+        if pivotType == lastType
+            moreExtreme = pivotType == 1 ? pivotPrice > lastPrice : pivotPrice < lastPrice
+            if moreExtreme
+                array.set(swingBars, count - 1, pivotBar)
+                array.set(swingPrices, count - 1, pivotPrice)
+                changed := true
+        else
+            array.push(swingBars, pivotBar)
+            array.push(swingPrices, pivotPrice)
+            array.push(swingTypes, pivotType)
+            while array.size(swingBars) > maxSwings
+                array.shift(swingBars)
+                array.shift(swingPrices)
+                array.shift(swingTypes)
+            changed := true
+    changed
+
+f_rule_state(index, phase) =>
+    hardInvalid = false
+    softWarn = false
+    note = ""
+    cycleStart = index - phase
+    if showRuleWarnings and cycleStart >= 0
+        if phase == 2 and index >= 2
+            p0 = array.get(swingPrices, cycleStart)
+            p1 = array.get(swingPrices, cycleStart + 1)
+            p2 = array.get(swingPrices, cycleStart + 2)
+            t0 = array.get(swingBars, cycleStart)
+            t1 = array.get(swingBars, cycleStart + 1)
+            t2 = array.get(swingBars, cycleStart + 2)
+            bullish = p1 > p0
+            wave1 = math.abs(p1 - p0)
+            retrace = wave1 > 0 ? math.abs(p1 - p2) / wave1 : na
+            time1 = math.max(1, t1 - t0)
+            time2 = math.max(1, t2 - t1)
+            hardInvalid := bullish ? p2 <= p0 : p2 >= p0
+            softWarn := not hardInvalid and ((not na(retrace) and retrace < wave2MinRetrace) or time2 > time1 * wave2MaxTime)
+            note := "Wave 2: retrace " + str.tostring(retrace * 100.0, "#.##") + "%, time x " + str.tostring(time2 / time1, "#.##")
+        if phase == 3 and index >= 3
+            p0 = array.get(swingPrices, cycleStart)
+            p1 = array.get(swingPrices, cycleStart + 1)
+            p2 = array.get(swingPrices, cycleStart + 2)
+            p3 = array.get(swingPrices, cycleStart + 3)
+            wave1 = math.abs(p1 - p0)
+            wave3 = math.abs(p3 - p2)
+            ratio = wave1 > 0 ? wave3 / wave1 : na
+            softWarn := not na(ratio) and ratio < wave3MinExtension
+            note := "Wave 3: " + str.tostring(ratio * 100.0, "#.##") + "% of Wave 1"
+        if phase == 4 and index >= 4
+            p1 = array.get(swingPrices, cycleStart + 1)
+            p2 = array.get(swingPrices, cycleStart + 2)
+            p3 = array.get(swingPrices, cycleStart + 3)
+            p4 = array.get(swingPrices, cycleStart + 4)
+            bullish = p3 > p2
+            wave3 = math.abs(p3 - p2)
+            retrace = wave3 > 0 ? math.abs(p3 - p4) / wave3 : na
+            hardInvalid := bullish ? p4 <= p1 : p4 >= p1
+            softWarn := not hardInvalid and not na(retrace) and (retrace < wave4MinRetrace or retrace > wave4MaxRetrace)
+            note := "Wave 4: retrace " + str.tostring(retrace * 100.0, "#.##") + "%"
+        if phase == 5 and index >= 5
+            p0 = array.get(swingPrices, cycleStart)
+            p1 = array.get(swingPrices, cycleStart + 1)
+            p2 = array.get(swingPrices, cycleStart + 2)
+            p3 = array.get(swingPrices, cycleStart + 3)
+            p4 = array.get(swingPrices, cycleStart + 4)
+            p5 = array.get(swingPrices, cycleStart + 5)
+            wave1 = math.abs(p1 - p0)
+            wave3 = math.abs(p3 - p2)
+            wave5 = math.abs(p5 - p4)
+            base = math.abs(p3 - p4)
+            ratio = base > 0 ? wave5 / base : na
+            hardInvalid := wave3 < wave1 and wave3 < wave5
+            softWarn := not hardInvalid and not na(ratio) and (ratio < wave5MinExtension or ratio > wave5MaxExtension)
+            note := "Wave 5: " + str.tostring(ratio * 100.0, "#.##") + "% of Wave 3-4"
+    [hardInvalid, softWarn, note]
+
+f_label_color(phase, hardInvalid, softWarn) =>
+    if hardInvalid
+        color.new(color.red, 0)
+    else if softWarn
+        color.new(color.orange, 0)
+    else if phase <= 5
+        color.new(color.black, 0)
+    else
+        color.new(color.teal, 0)
+
+f_draw_wave5_targets(cycleStart) =>
+    if showTargets and cycleStart >= 0 and array.size(swingPrices) > cycleStart + 4
+        p3 = array.get(swingPrices, cycleStart + 3)
+        p4 = array.get(swingPrices, cycleStart + 4)
+        b4 = array.get(swingBars, cycleStart + 4)
+        bullish = p3 > p4
+        base = math.abs(p3 - p4)
+        minTarget = bullish ? p4 + base * wave5MinExtension : p4 - base * wave5MinExtension
+        maxTarget = bullish ? p4 + base * wave5MaxExtension : p4 - base * wave5MaxExtension
+        minLine = line.new(b4, minTarget, bar_index, minTarget, extend=extend.right, color=color.new(color.green, 45), style=line.style_dashed)
+        maxLine = line.new(b4, maxTarget, bar_index, maxTarget, extend=extend.right, color=color.new(color.green, 70), style=line.style_dotted)
+        array.push(targetLines, minLine)
+        array.push(targetLines, maxLine)
+
+f_redraw() =>
+    f_clear_drawings()
+    count = array.size(swingBars)
+    if count > 0
+        for i = 0 to count - 1
+            b = array.get(swingBars, i)
+            p = array.get(swingPrices, i)
+            t = array.get(swingTypes, i)
+            phase = f_phase(i)
+            if i > 0
+                prevBar = array.get(swingBars, i - 1)
+                prevPrice = array.get(swingPrices, i - 1)
+                lineColor = phase <= 5 ? impulseLineColor : correctionLineColor
+                ln = line.new(prevBar, prevPrice, b, p, color=lineColor, width=2)
+                array.push(drawnLines, ln)
+            if showZero or phase != 0
+                [hardInvalid, softWarn, note] = f_rule_state(i, phase)
+                style = t == 1 ? label.style_label_down : label.style_label_up
+                lbl = label.new(b, p, text=f_phase_text(phase), style=style, yloc=yloc.price, color=f_label_color(phase, hardInvalid, softWarn), textcolor=labelTextColor, size=f_label_size(), tooltip=note)
+                array.push(drawnLabels, lbl)
+            if phase == 4
+                f_draw_wave5_targets(i - phase)
+
+pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
+pivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
+pivotBar = bar_index - pivotRight
+changed = false
+
+if not na(pivotHigh) and not na(pivotLow)
+    lastPrice = array.size(swingPrices) > 0 ? array.get(swingPrices, array.size(swingPrices) - 1) : close[pivotRight]
+    useHigh = math.abs(pivotHigh - lastPrice) >= math.abs(pivotLow - lastPrice)
+    changed := useHigh ? f_upsert_swing(pivotBar, pivotHigh, 1) : f_upsert_swing(pivotBar, pivotLow, -1)
+else if not na(pivotHigh)
+    changed := f_upsert_swing(pivotBar, pivotHigh, 1)
+else if not na(pivotLow)
+    changed := f_upsert_swing(pivotBar, pivotLow, -1)
+
+if changed
+    f_redraw()

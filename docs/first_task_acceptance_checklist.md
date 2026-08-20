@@ -10,6 +10,8 @@ the client.
 - Add it to the same symbol/timeframe used for review.
 - Paste `pine/geo_p_momentum.pine` only if the client wants signal-only alerts.
 - Use the signal-only indicator when validating the screenshot examples because it does not suppress labels with stop/target checks.
+- Paste `pine/elliott_wave_notes.pine` separately when validating the Elliott Wave notes overlay.
+- Confirm the Elliott Wave script draws swing lines, wave labels, rule-warning colors, and the optional Wave 5 target zone.
 
 ## Matching Settings
 
@@ -36,6 +38,7 @@ the client.
 - Export the same OHLCV candles used in TradingView.
 - Run `python/geo_p_momentum.py` against that CSV.
 - Compare `buy_signal`, `sell_signal`, stop, and target-1 values to the Pine strategy.
+- Run `compute_elliott_waves` on the same candles when validating the Elliott Wave overlay labels.
 
 ## Client Confirmation
 

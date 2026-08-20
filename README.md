@@ -5,6 +5,9 @@ material:
 
 **GEO P Momentum - Momentum Trader: Bollinger Band Challenge with Trendline Break**
 
+It also includes a separate Elliott Wave notes overlay created from the latest
+EW PDFs and chart example.
+
 The implementation follows the attached PDF checklist with the latest
 ignore-instruction applied, and matches the full project requirement: Pine
 Script v6 for TradingView plus a Python 3.10+ module for backtesting with
@@ -14,9 +17,12 @@ matching entry/exit signals.
 
 - `pine/geo_p_momentum_strategy.pine` - Main TradingView Pine v6 strategy with entries, exits, BUY/SELL markers, alerts, stop, and target validation.
 - `pine/geo_p_momentum.pine` - Signal-only TradingView Pine v6 indicator for clients who only want BUY/SELL markers and alerts without stop/target validation hiding labels.
+- `pine/elliott_wave_notes.pine` - Elliott Wave notes overlay with swing labels, connecting lines, rule warnings, and Wave 5 target zone.
 - `python/geo_p_momentum.py` - Matching Python signal engine and simple target-1 backtest helper.
+- `python/elliott_wave_notes.py` - Matching Python Elliott Wave swing/label engine.
 - `python/__init__.py` - Package export.
 - `docs/geo_p_momentum_pdf_rules.md` - Row-by-row extraction of the first PDF checklist.
+- `docs/elliott_wave_notes_rules.md` - Elliott Wave rule extraction and implementation notes.
 - `docs/first_task_acceptance_checklist.md` - Compile/parity checklist for validating the first setup.
 - `requirements.txt` - Minimal Python dependencies.
 
@@ -151,9 +157,10 @@ future confirmed candle and would repaint.
 1. Open TradingView Pine Editor.
 2. Paste `pine/geo_p_momentum_strategy.pine` for the full strategy/backtest deliverable.
 3. Paste `pine/geo_p_momentum.pine` instead only when the client wants signal markers and alerts without strategy orders.
-4. Keep `Timeframe mapping` on `PDF Auto` for the client hierarchy, or switch to `Manual` and set Tide/Wave explicitly.
-5. Keep `Signal strength` and `Required Better rows` the same in Pine and Python when comparing signals.
-6. Enable `Plot BUY/SELL 1 candle earlier` only when the client wants earlier-looking chart labels for visual review.
+4. Paste `pine/elliott_wave_notes.pine` when the client wants the Elliott Wave overlay shown like the reference chart.
+5. Keep `Timeframe mapping` on `PDF Auto` for the client hierarchy, or switch to `Manual` and set Tide/Wave explicitly.
+6. Keep `Signal strength` and `Required Better rows` the same in Pine and Python when comparing signals.
+7. Enable `Plot BUY/SELL 1 candle earlier` only when the client wants earlier-looking chart labels for visual review.
 
 ## Python Usage
 
@@ -177,6 +184,15 @@ trades = backtest_signals(signals)
 
 print(signals[signals["buy_signal"] | signals["sell_signal"]])
 print(trades)
+```
+
+Elliott Wave overlay data:
+
+```python
+from python.elliott_wave_notes import ElliottWaveConfig, compute_elliott_waves
+
+ew = compute_elliott_waves(df, ElliottWaveConfig(pivot_left=5, pivot_right=5))
+print(ew[ew["ew_pivot"]][["ew_label", "ew_rule_state", "ew_rule_note"]])
 ```
 
 Or run as a CLI:
