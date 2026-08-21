@@ -1,238 +1,227 @@
-# Trading Setup Conversion
+# Trading PDF to Pine & Python
 
-This workspace contains the first converted setup from the supplied PDF/chart
-material:
+This project converts rule-based trading setups from PDFs, notes, and marked
+charts into:
 
-**GEO P Momentum - Momentum Trader: Bollinger Band Challenge with Trendline Break**
+- TradingView indicators and strategies written in Pine Script v6.
+- Python 3.10+ signal engines for analysis and backtesting.
 
-It also includes a separate Elliott Wave notes overlay created from the latest
-EW PDFs and chart example.
+The repository currently contains a working **GEO P Momentum** implementation
+and a separate **Elliott Wave Notes** overlay. Reference material for the full
+setup collection is stored in the repository for future development.
 
-The implementation follows the attached PDF checklist with the latest
-ignore-instruction applied, and matches the full project requirement: Pine
-Script v6 for TradingView plus a Python 3.10+ module for backtesting with
-matching entry/exit signals.
+> **Project status:** Active development. Pine and Python share the same rule
+> definitions, but candle-for-candle parity must still be validated using the
+> same market data, session, timezone, timeframe, and settings.
 
-## Files
+## Current Implementations
 
-- `pine/geo_p_momentum_strategy.pine` - Main TradingView Pine v6 strategy with entries, exits, BUY/SELL markers, alerts, stop, and target validation.
-- `pine/geo_p_momentum.pine` - Signal-only TradingView Pine v6 indicator for clients who only want BUY/SELL markers and alerts without stop/target validation hiding labels.
-- `pine/elliott_wave_notes.pine` - Elliott Wave notes overlay with swing labels, connecting lines, Wave 1 start checks, correction-pattern labels, time-rule table, rule warnings, and Wave 5 target zone.
-- `python/geo_p_momentum.py` - Matching Python signal engine and simple target-1 backtest helper.
-- `python/elliott_wave_notes.py` - Matching Python Elliott Wave swing/label engine with Wave 1 start notes, correction labels, and timing columns.
-- `python/__init__.py` - Package export.
-- `docs/geo_p_momentum_pdf_rules.md` - Row-by-row extraction of the first PDF checklist.
-- `docs/elliott_wave_notes_rules.md` - Elliott Wave rule extraction and implementation notes.
-- `docs/first_task_acceptance_checklist.md` - Compile/parity checklist for validating the first setup.
-- `requirements.txt` - Minimal Python dependencies.
+| Feature | TradingView | Python | Status |
+| --- | --- | --- | --- |
+| GEO P Momentum signals | Indicator | Signal engine | Implemented |
+| GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
+| Elliott Wave notes | Visual overlay | Swing-label engine | Implemented, under refinement |
+| Remaining PDF setups | — | — | Reference material only |
 
-Only one PDF/setup is present in the workspace, so only the first setup is
-implemented. The remaining 10-12 setup package can be completed as soon as the
-remaining PDFs are supplied.
+## GEO P Momentum
 
-## Rule Mapping
+The GEO P Momentum setup models a Bollinger Band challenge followed by a
+trendline or range breakout. Its confirmation logic includes:
 
-The first PDF/screenshot checklist is implemented as a BUY/SELL setup.
-Rows marked `Buy` or `Sell` are scored for the full checklist path. The
-`Signal strength` input controls how many of those rows must agree:
+- Tide/Wave multi-timeframe direction.
+- Bollinger Band upper and lower challenges.
+- RSI, volume, EMA crossover, DMI, and ADX confirmation.
+- Higher-low and lower-high pivot structure.
+- Optional EMA 50 and support/resistance filters.
+- Configurable `Fast`, `Balanced`, and `Strict PDF` signal modes.
+- Stops, target levels, TradingView alerts, and a Python backtest helper.
 
-- `Fast` - mandatory PDF conditions only.
-- `Balanced` - mandatory PDF conditions plus 3 of 5 Buy/Sell rows.
-- `Strict PDF` - mandatory PDF conditions plus all 5 Buy/Sell rows.
+The default `PDF Auto` timeframe mapping follows the supplied Tide/Wave
+hierarchy. For example, on a 15-minute execution chart it uses 4H Tide and 1H
+Wave contexts for the Line #2 refinement.
 
-The Pine files and Python module use `Balanced` by default and require zero
-Better rows by default. Use `Strict PDF` when the client wants every visible
-Buy/Sell row satisfied before a signal. `Required Better rows` can enforce up to
-four active Better confirmations.
+The formulas used for PDF abbreviations that were not mathematically defined
+are documented in [docs/geo_p_momentum_pdf_rules.md](docs/geo_p_momentum_pdf_rules.md).
 
-Per the latest client/user instruction, PDF Step 2 is ignored and
-`SOBBO/SOBBD` plus `TMG/TMJ` are not used in the active signal logic.
+## Elliott Wave Notes
 
-## Timeframe Mapping
+The Elliott Wave implementation is a separate analytical overlay; it does not
+generate GEO P Momentum BUY or SELL signals. It currently provides:
 
-The latest chart review clarified that the PDF's Tide/Wave row must be applied
-as a multi-timeframe filter. With `Timeframe mapping = PDF Auto`, the scripts
-map the execution chart to higher Tide/Wave contexts. The key client example is:
+- Confirmed and ATR-filtered swing detection.
+- Important High/Low anchoring with a configurable 144-bar lookback.
+- MACD-extreme or RSI/MACD-divergence confirmation for Wave 1 starts.
+- Main `0-1-2-3-4-5` labels and selectable correction labels.
+- Optional internal Wave 4 `(A)-(B)-(C)` structure.
+- Flat B-wave validation from 61.8% to 111%.
+- Fibonacci guides from 0% through 127.2%.
+- Selected timing, retracement, extension, and Wave 5 target warnings.
 
-- On a 15-minute chart, Tide is `4H` / `240` and Wave is `1H` / `60`.
-- BUY Line #2 refinement: Tide `4H` has BBUC plus TI uptick, and both Tide
-  `4H` RSI and Wave `1H` RSI are above 50.
-- SELL Line #2 refinement: the bearish mirror uses Tide BBDC plus TI downtick,
-  and both Tide and Wave RSI are below 50.
+This is a deterministic, reference-driven swing overlay—not a complete
+automatic Elliott Wave or NeoWave classifier. The newer correction and NeoWave
+documents are retained as reference material for future validation work.
 
-Use `Manual` mode only when the client wants to override the PDF hierarchy.
-The `Use PDF line 2 MTF refinement` input keeps this as an additional trigger
-beside the full checklist signal, so Case 1 can remain unchanged while Case 2
-and Case 3 can be caught from the Tide/Wave rule.
+See [docs/elliott_wave_notes_rules.md](docs/elliott_wave_notes_rules.md) for the
+implemented rules and assumptions.
 
-## Elliott Wave Overlay
+## Repository Layout
 
-The Elliott Wave script is separate from the GEO BUY/SELL strategy. It draws the
-wave structure from the Elliott Wave PDFs and the reference chart.
+```text
+Trading-PDF-Python/
+├── pine/
+│   ├── geo_p_momentum.pine
+│   ├── geo_p_momentum_strategy.pine
+│   └── elliott_wave_notes.pine
+├── python/
+│   ├── __init__.py
+│   ├── geo_p_momentum.py
+│   └── elliott_wave_notes.py
+├── docs/
+│   ├── geo_p_momentum_pdf_rules.md
+│   ├── elliott_wave_notes_rules.md
+│   └── first_task_acceptance_checklist.md
+├── assest/
+│   ├── All Setups/
+│   ├── Elliot Wave First/
+│   ├── Elliot Wave Second/
+│   └── screen/
+├── requirements.txt
+└── README.md
+```
 
-Wave 1 is anchored from Important High/Low pivots using the configurable 144-bar lookback and 61.8% degree-development rule from the notes. The default start filter now also requires MACD lowest/highest context or RSI/MACD divergence, matching the marked chart workflow. Pine can draw the Important High/Low Fibonacci guide levels so the 14%, 23.6%, 38.2%, 50%, 61.8%, 81.2%, 100%, 111%, and 127.2% zones are visible on the chart.
-
-The correction labels are configurable. Use `A-B-C` for a simple correction,
-`W-X-Y` or `W-X-Y-X-Z` for double/triple corrections, and `A-B-C-D-E` for a
-triangle-style correction. The default `Validated Anchor` count mode filters the marked chart problem where every local ZigZag swing was being promoted into a fresh wave count. Wave 4 can also be shown internally as `(A)`, `(B)`, `4/(C)`, with flat `B` validated from 61.8% to 111% as shown in the notes. Switch to `All swings` only when lower-degree debugging is needed. The Pine overlay also shows a visible time-rule table for Wave 2, Wave 3, and Wave 4 timing rules from the notes.
-
-## Buy Side
-
-Mandatory gate:
-
-- `Tide - BBUC OR price in upper half`
-- `Tide - TI uptick`
-- `Tide and Wave - RSI > 50`
-- `Wave - BBUC with TLBO`
-
-PDF Buy rows scored:
-
-- Above-average volume for the breakout candle.
-- At least two higher lows on line-chart close pivots.
-- 5 EMA positive crossover with 13 EMA or 26 EMA in the last 3 bars.
-- DI positive crossover.
-- Directional ADX Ungli, or ADX above 15.
-
-Better confirmations available as optional filters:
-
-- TI above zero.
-- RSI crossing above 60.
-- Price above 50 EMA.
-- No immediate major resistance.
-
-## Sell Side
-
-Mandatory gate:
-
-- `Tide - BBDC OR price in lower half`
-- `Tide - TI downtick`
-- `Tide and Wave - RSI < 50`
-- `Wave - BBDC with TLBD`
-
-PDF Sell rows scored:
-
-- Above-average volume for the breakdown candle.
-- At least two lower highs on line-chart close pivots.
-- 5 EMA negative crossover with 13 EMA or 26 EMA in the last 3 bars.
-- DI negative crossover.
-- Directional ADX Ungli, or ADX above 15.
-
-Better confirmations available as optional filters:
-
-- TI below zero.
-- RSI crossing below 40.
-- Price below 50 EMA.
-- No immediate major support.
-
-## Stop And Target
-
-The full Pine strategy and Python backtester use the PDF stop/target wording:
-
-- BUY stop: below the BB challenge candle or TLBO point.
-- SELL stop: above the BB challenge candle or TLBD point.
-- Target 1: nearest major support/resistance when available; otherwise a Fibonacci extension of the recent swing range.
-
-## Configurable Assumptions
-
-The PDF checklist does not give formulas for every proprietary abbreviation.
-These definitions are explicit in code and can be replaced if the client gives
-a glossary:
-
-- Bollinger Bands default to `20, 2.0`.
-- `BBUC` means high challenges the upper Bollinger Band.
-- `BBDC` means low challenges the lower Bollinger Band.
-- `TI` is implemented as `EMA(13) - EMA(26)`, with uptick/downtick checks.
-- `TLBO/TLBD` use confirmed pivot trendline breaks, with a range-break fallback.
-- `DI PCO/NCO` use +DI/-DI crossovers from DMI.
-- `ADX Ungli` is implemented from the TradingView screenshots as an ADX upward hook while +DI/-DI spreads in the trade direction, or ADX above 15.
-- PDF Step 2, `SOBBO/SOBBD`, and `TMG/TMJ` are intentionally ignored per the latest instruction.
-
-## TradingView Screenshot Alignment
-
-The supplied TradingView screenshots highlight the lower ADX/DMI panel before
-continuation moves. The implementation interprets that visual as:
-
-- Buy-side ADX Ungli: ADX hooks upward, +DI is above -DI, and the DI spread expands.
-- Sell-side ADX Ungli: ADX hooks upward, -DI is above +DI, and the DI spread expands.
-- The same rules are used in Pine and Python.
-
-The signal-only Pine indicator plots the PDF setup signal directly; the strategy
-file additionally checks valid stop/target placement before placing orders.
-Both Pine files include a display option named `Plot BUY/SELL 1 candle earlier`.
-This shifts only the visible chart marker one bar left. It does not move alerts,
-orders, or Python signals earlier, because that would require predicting a
-future confirmed candle and would repaint.
+The existing `assest` directory name is preserved to avoid breaking project
+paths and history.
 
 ## TradingView Usage
 
-1. Open TradingView Pine Editor.
-2. Paste `pine/geo_p_momentum_strategy.pine` for the full strategy/backtest deliverable.
-3. Paste `pine/geo_p_momentum.pine` instead only when the client wants signal markers and alerts without strategy orders.
-4. Paste `pine/elliott_wave_notes.pine` when the client wants the Elliott Wave overlay shown like the reference chart.
-5. Keep `Timeframe mapping` on `PDF Auto` for the client hierarchy, or switch to `Manual` and set Tide/Wave explicitly.
-6. Keep `Signal strength` and `Required Better rows` the same in Pine and Python when comparing signals.
-7. Enable `Plot BUY/SELL 1 candle earlier` only when the client wants earlier-looking chart labels for visual review.
+1. Open TradingView and create a new script in the Pine Editor.
+2. Copy one of the following files into the editor:
+   - [pine/geo_p_momentum.pine](pine/geo_p_momentum.pine) for BUY/SELL markers
+     and alerts.
+   - [pine/geo_p_momentum_strategy.pine](pine/geo_p_momentum_strategy.pine) for
+     entries, exits, stops, targets, and Strategy Tester results.
+   - [pine/elliott_wave_notes.pine](pine/elliott_wave_notes.pine) for the
+     Elliott Wave visual overlay.
+3. Add the script to the chart and configure its inputs.
+4. Use the same inputs in Pine and Python when comparing their output.
+
+The `Plot BUY/SELL 1 candle earlier` option changes only marker placement. It
+does not move alerts, strategy orders, or Python signals because doing so would
+require future confirmation and could repaint.
 
 ## Python Usage
 
-Install dependencies:
+### Installation
 
 ```bash
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
 pip install -r requirements.txt
 ```
 
-Use from code:
+Input data for GEO P Momentum must contain `open`, `high`, `low`, `close`, and
+`volume` columns. A `DatetimeIndex` is recommended for multi-timeframe
+resampling. Elliott Wave analysis requires the OHLC columns.
+
+### GEO P Momentum signals
 
 ```python
 import pandas as pd
-from python.geo_p_momentum import GeoPMomentumConfig, backtest_signals, compute_signals
 
-df = pd.read_csv("xauusd_15m.csv", parse_dates=["time"]).set_index("time")
-cfg = GeoPMomentumConfig(chart_timeframe="15", signal_mode="Balanced")
+from python.geo_p_momentum import (
+    GeoPMomentumConfig,
+    backtest_signals,
+    compute_signals,
+)
 
-signals = compute_signals(df, cfg)
+candles = (
+    pd.read_csv("xauusd_15m.csv", parse_dates=["time"])
+    .set_index("time")
+)
+
+config = GeoPMomentumConfig(
+    chart_timeframe="15",
+    signal_mode="Balanced",
+)
+
+signals = compute_signals(candles, config)
 trades = backtest_signals(signals)
 
-print(signals[signals["buy_signal"] | signals["sell_signal"]])
+print(signals.loc[signals["buy_signal"] | signals["sell_signal"]])
 print(trades)
 ```
 
-Elliott Wave overlay data:
+### Elliott Wave overlay data
 
 ```python
 from python.elliott_wave_notes import ElliottWaveConfig, compute_elliott_waves
 
-ew = compute_elliott_waves(
-    df,
+waves = compute_elliott_waves(
+    candles,
     ElliottWaveConfig(
-        pivot_left=5,
-        pivot_right=5,
-        correction_pattern="W-X-Y-X-Z",
-        show_wave4_internal=True,
         count_mode="Validated Anchor",
-        min_swing_atr_multiple=1.5,
-        min_swing_range_pct=0.03,
-        important_lookback=144,
-        degree_retrace=0.618,
+        correction_pattern="A-B-C",
+        show_wave4_internal=True,
     ),
 )
-print(ew[ew["ew_pivot"]][["ew_label", "ew_rule_state", "ew_rule_note", "ew_time_ratio"]])
+
+print(
+    waves.loc[
+        waves["ew_pivot"],
+        ["ew_label", "ew_rule_state", "ew_rule_note", "ew_time_ratio"],
+    ]
+)
 ```
 
-Or run as a CLI:
+### Command line
 
 ```bash
-python python/geo_p_momentum.py xauusd_15m.csv --time-column time --chart-timeframe 15 --signal-mode Balanced --min-better-confirmations 0 --output signals.csv
+python python/geo_p_momentum.py xauusd_15m.csv \
+  --time-column time \
+  --chart-timeframe 15 \
+  --signal-mode Balanced \
+  --output signals.csv
 ```
 
-## Parity Notes
+On Windows PowerShell, place the command on one line or replace each `\` with a
+PowerShell backtick.
 
-For candle-for-candle alignment between TradingView and Python:
+## Signal Modes
 
-- Use the same OHLCV data, exchange session, timezone, and candle close timestamps.
-- Use the same Timeframe mapping, chart timeframe, Tide timeframe, and Wave timeframe in both environments. Python accepts TradingView-style intraday values such as `60`.
-- Use the same Signal strength in both environments.
-- Use the same Required Better rows / `min_better_confirmations` value.
-- Keep all indicator inputs identical.
-- Leave `Plot BUY/SELL 1 candle earlier` off during Pine/Python parity checks because it is display-only.
-- If the client supplies exact formulas for TI, ADX Ungli, or target calculation, update both Pine and Python together.
+| Mode | Requirement |
+| --- | --- |
+| `Fast` | Mandatory PDF conditions only |
+| `Balanced` | Mandatory conditions plus 3 of 5 scored rows |
+| `Strict PDF` | Mandatory conditions plus all 5 scored rows |
+
+`Balanced` is the default. Optional “Better” confirmations can be enabled
+separately. PDF Step 2 (`SOBBO/SOBBD` and `TMG/TMJ`) is intentionally excluded
+from active signal logic following the latest project instruction.
+
+## Pine/Python Comparison
+
+For the closest possible result between TradingView and Python:
+
+- Use identical OHLCV candles and indicator inputs.
+- Match the exchange session, timezone, and candle-close timestamps.
+- Match the chart, Tide, and Wave timeframes.
+- Keep the signal mode and required Better confirmations identical.
+- Disable the display-only earlier-marker option during comparison.
+- Compare confirmed signal bars before comparing backtest performance.
+
+The Pine strategy includes 0.01% commission. The current Python backtest helper
+reports point-based results and does not yet model equivalent fees or slippage,
+so performance totals should not be treated as directly interchangeable.
+
+## Documentation
+
+- [GEO P Momentum rule mapping](docs/geo_p_momentum_pdf_rules.md)
+- [Elliott Wave implementation notes](docs/elliott_wave_notes_rules.md)
+- [First setup acceptance checklist](docs/first_task_acceptance_checklist.md)
+
+Source PDFs, Word documents, and chart screenshots are organized under
+`assest/`. These files provide implementation context; they are not executable
+project components.
