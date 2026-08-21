@@ -20,7 +20,7 @@ setup collection is stored in the repository for future development.
 | --- | --- | --- | --- |
 | GEO P Momentum signals | Indicator | Signal engine | Implemented |
 | GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
-| Elliott Wave notes | Visual overlay | Swing-label engine | Implemented, under refinement |
+| Elliott Wave engine | Phase-1 state overlay | Phase-1 state engine | P0 complete; later classifiers pending |
 | Remaining PDF setups | — | — | Reference material only |
 
 ## GEO P Momentum
@@ -46,20 +46,23 @@ are documented in [docs/geo_p_momentum_pdf_rules.md](docs/geo_p_momentum_pdf_rul
 ## Elliott Wave Notes
 
 The Elliott Wave implementation is a separate analytical overlay; it does not
-generate GEO P Momentum BUY or SELL signals. It currently provides:
+generate GEO P Momentum BUY or SELL signals. Its default Phase-1 engine now
+provides:
 
 - Confirmed and ATR-filtered swing detection.
-- Important High/Low anchoring with a configurable 144-bar lookback.
-- MACD-extreme or RSI/MACD-divergence confirmation for Wave 1 starts.
-- Main `0-1-2-3-4-5` labels and selectable correction labels.
-- Optional internal Wave 4 `(A)-(B)-(C)` structure.
-- Flat B-wave validation from 61.8% to 111%.
-- Fibonacci guides from 0% through 127.2%.
-- Selected timing, retracement, extension, and Wave 5 target warnings.
+- Separate raw pivots and main Elliott labels.
+- Degree-source Important High/Low context (Daily by default in Pine) and a
+  true 144-calendar-day context in Python.
+- Configurable MACD-extreme and RSI/MACD-divergence base confirmation.
+- Wave 1 candidates with 5/9/13/17/21 internal moves and 61.8% degree progress.
+- Persistent Point 0/Wave 1 locking so later small swings cannot move the count.
+- Hard origin invalidation, reason codes, alternate bases, and controlled recounts.
+- State/debug output for `SEARCHING`, `FORMING`, `CONFIRMED`, `ALTERNATE`, and
+  `INVALID`.
 
-This is a deterministic, reference-driven swing overlay—not a complete
-automatic Elliott Wave or NeoWave classifier. The newer correction and NeoWave
-documents are retained as reference material for future validation work.
+Wave 2-5 and the automatic correction, triangle, and diagonal classifiers are
+still later phases. The old modulo-style full label sequence remains available
+only as `Legacy fixed cycle` comparison mode and is not the accepted engine.
 
 See [docs/elliott_wave_notes_rules.md](docs/elliott_wave_notes_rules.md) for the
 implemented rules and assumptions.
@@ -79,7 +82,11 @@ Trading-PDF-Python/
 ├── docs/
 │   ├── geo_p_momentum_pdf_rules.md
 │   ├── elliott_wave_notes_rules.md
+│   ├── elliott_wave_implementation_checklist_v2.md
 │   └── first_task_acceptance_checklist.md
+├── tests/
+│   ├── test_elliott_wave_state_engine.py
+│   └── test_elliott_wave_pine_contract.py
 ├── assest/
 │   ├── All Setups/
 │   ├── Elliot Wave First/
@@ -124,7 +131,8 @@ pip install -r requirements.txt
 
 Input data for GEO P Momentum must contain `open`, `high`, `low`, `close`, and
 `volume` columns. A `DatetimeIndex` is recommended for multi-timeframe
-resampling. Elliott Wave analysis requires the OHLC columns.
+resampling and is required by the default Elliott Wave calendar-day context.
+Elliott Wave analysis requires the `high`, `low`, and `close` columns.
 
 ### GEO P Momentum signals
 
@@ -162,16 +170,16 @@ from python.elliott_wave_notes import ElliottWaveConfig, compute_elliott_waves
 waves = compute_elliott_waves(
     candles,
     ElliottWaveConfig(
-        count_mode="Validated Anchor",
-        correction_pattern="A-B-C",
-        show_wave4_internal=True,
+        engine_mode="Candidate State",
+        degree_preset="Chartking Day Trading",
+        important_context_mode="Calendar days",
     ),
 )
 
 print(
     waves.loc[
-        waves["ew_pivot"],
-        ["ew_label", "ew_rule_state", "ew_rule_note", "ew_time_ratio"],
+        waves["ew_raw_pivot"] | waves["ew_pivot"],
+        ["ew_label", "ew_engine_state", "ew_reason_code", "ew_rule_note"],
     ]
 )
 ```
@@ -220,6 +228,7 @@ so performance totals should not be treated as directly interchangeable.
 
 - [GEO P Momentum rule mapping](docs/geo_p_momentum_pdf_rules.md)
 - [Elliott Wave implementation notes](docs/elliott_wave_notes_rules.md)
+- [Elliott Wave v2 implementation checklist](docs/elliott_wave_implementation_checklist_v2.md)
 - [First setup acceptance checklist](docs/first_task_acceptance_checklist.md)
 
 Source PDFs, Word documents, and chart screenshots are organized under

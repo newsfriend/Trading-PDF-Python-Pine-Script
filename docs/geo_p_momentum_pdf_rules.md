@@ -1,6 +1,6 @@
 # GEO P Momentum PDF Rules
 
-Source: `assest/GEO P MOMENTUM (1).pdf`
+Source: `assest/All Setups/4. GEO P MOMENTUM.pdf`
 
 PDF title visible in the supplied material:
 

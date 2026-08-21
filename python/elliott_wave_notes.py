@@ -1,8 +1,14 @@
-"""Elliott Wave overlay engine based on the supplied notes.
+"""State-based Elliott Wave overlay engine.
 
-The module produces deterministic swing labels for the visual Elliott Wave
-overlay. It does not try to "predict" a wave count; it labels confirmed ZigZag
-pivots and flags rule warnings from the notes so the count can be reviewed.
+The confirmed pivot/ATR layer is only a raw market-structure provider.  Main
+Elliott labels are emitted by a persistent candidate lifecycle so that a new
+minor pivot cannot advance or restart the main-degree count by itself.
+
+Phase 1 implements the P0 foundation from the developer manual: raw/main pivot
+separation, degree-aware Important High/Low context, Point-0 candidates,
+persistent base locking, W1 degree confirmation, hard origin invalidation and
+controlled recount audit fields.  Later impulse/correction classifiers remain
+explicitly visible as pending rather than being simulated with modulo labels.
 """
 
 from __future__ import annotations
@@ -30,6 +36,12 @@ _FIB_LEVELS = (
 class ElliottWaveConfig:
     """Configurable values shared with ``pine/elliott_wave_notes.pine``."""
 
+    engine_mode: str = "Candidate State"
+    degree_preset: str = "Chartking Day Trading"
+    degree_name: str = "Major"
+    degree_timeframe: str = "D"
+    important_context_mode: str = "Calendar days"
+    important_lookback_days: int = 144
     pivot_left: int = 5
     pivot_right: int = 5
     max_swings: int = 45
@@ -39,6 +51,7 @@ class ElliottWaveConfig:
     show_wave4_internal: bool = True
     count_mode: str = "Validated Anchor"
     wave1_start_mode: str = "Important swing + oscillator"
+    base_oscillator_mode: str = "Extreme or divergence"
     anchor_direction: str = "Auto"
     important_atr_length: int = 14
     important_atr_multiple: float = 1.0
@@ -60,6 +73,7 @@ class ElliottWaveConfig:
     wave5_min_extension: float = 1.27
     wave5_max_extension: float = 2.618
     time_tolerance: float = 0.25
+    w1_internal_move_counts: tuple[int, ...] = (5, 9, 13, 17, 21)
 
 
 @dataclass(frozen=True)
@@ -92,6 +106,17 @@ def compute_elliott_waves(
     swings = _build_swings(pivots, cfg)
 
     result = source.copy()
+    result["ew_raw_pivot"] = False
+    result["ew_raw_side"] = np.nan
+    result["ew_raw_confirmed_at"] = pd.Series(index=result.index, dtype="object")
+    for swing in swings:
+        result.loc[swing.index, "ew_raw_pivot"] = True
+        result.loc[swing.index, "ew_raw_side"] = swing.kind
+        result.loc[swing.index, "ew_raw_confirmed_at"] = swing.confirmed_index
+
+    if cfg.engine_mode == "Candidate State":
+        return _compute_candidate_state(source, swings, cfg, result)
+
     result["ew_pivot"] = False
     result["ew_confirmed_at"] = pd.Series(index=result.index, dtype="object")
     result["ew_label"] = pd.Series(index=result.index, dtype="object")
@@ -150,6 +175,35 @@ def compute_elliott_waves(
 
 
 def _validate_config(cfg: ElliottWaveConfig) -> None:
+    valid_engine_modes = {"Candidate State", "Legacy fixed cycle"}
+    if cfg.engine_mode not in valid_engine_modes:
+        raise ValueError(f"engine_mode must be one of {sorted(valid_engine_modes)}")
+    valid_degree_presets = {
+        "Chartking Day Trading",
+        "Hardik 1Y",
+        "Hardik Swing",
+        "Hardik Day Trading",
+        "Manual",
+    }
+    if cfg.degree_preset not in valid_degree_presets:
+        raise ValueError(f"degree_preset must be one of {sorted(valid_degree_presets)}")
+    if cfg.important_context_mode not in {"Calendar days", "Legacy bars"}:
+        raise ValueError('important_context_mode must be "Calendar days" or "Legacy bars"')
+    if cfg.important_lookback_days < 1:
+        raise ValueError("important_lookback_days must be at least 1 day")
+    valid_oscillator_modes = {
+        "Extreme or divergence",
+        "Extreme only",
+        "Divergence only",
+        "Extreme and divergence",
+        "Off",
+    }
+    if cfg.base_oscillator_mode not in valid_oscillator_modes:
+        raise ValueError(f"base_oscillator_mode must be one of {sorted(valid_oscillator_modes)}")
+    if not cfg.w1_internal_move_counts or any(
+        count < 5 or count % 4 != 1 for count in cfg.w1_internal_move_counts
+    ):
+        raise ValueError("w1_internal_move_counts must use the 5/9/13/17/21 (+4) sequence")
     valid_patterns = {"A-B-C", "W-X-Y", "W-X-Y-X-Z", "A-B-C-D-E"}
     if cfg.correction_pattern not in valid_patterns:
         raise ValueError(f"correction_pattern must be one of {sorted(valid_patterns)}")
@@ -184,6 +238,26 @@ def _with_indicators(source: pd.DataFrame, cfg: ElliottWaveConfig) -> pd.DataFra
     close = enriched["close"].astype(float)
     high = enriched["high"].astype(float)
     low = enriched["low"].astype(float)
+
+    if cfg.important_context_mode == "Calendar days":
+        if not isinstance(enriched.index, pd.DatetimeIndex):
+            raise ValueError(
+                "A DatetimeIndex is required for Calendar days Important H/L context. "
+                "Use important_context_mode='Legacy bars' only for compatibility data."
+            )
+        window = f"{cfg.important_lookback_days}D"
+        enriched["_ew_important_high"] = high.rolling(window, min_periods=1).max()
+        enriched["_ew_important_low"] = low.rolling(window, min_periods=1).min()
+    else:
+        enriched["_ew_important_high"] = high.rolling(
+            cfg.important_lookback, min_periods=1
+        ).max()
+        enriched["_ew_important_low"] = low.rolling(
+            cfg.important_lookback, min_periods=1
+        ).min()
+    enriched["_ew_important_range"] = (
+        enriched["_ew_important_high"] - enriched["_ew_important_low"]
+    )
 
     previous_close = close.shift(1)
     true_range = pd.concat(
@@ -223,16 +297,18 @@ def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]
     rsi = source["_ew_rsi"].astype(float).to_numpy()
     macd_lowest = source["_ew_macd_lowest"].fillna(False).astype(bool).to_numpy()
     macd_highest = source["_ew_macd_highest"].fillna(False).astype(bool).to_numpy()
+    context_highs = source["_ew_important_high"].astype(float).to_numpy()
+    context_lows = source["_ew_important_low"].astype(float).to_numpy()
+    context_ranges = source["_ew_important_range"].astype(float).to_numpy()
     pivots: list[_Swing] = []
 
     for position in range(cfg.pivot_left, len(source) - cfg.pivot_right):
         confirmed_position = position + cfg.pivot_right
         high_window = highs[position - cfg.pivot_left : position + cfg.pivot_right + 1]
         low_window = lows[position - cfg.pivot_left : position + cfg.pivot_right + 1]
-        important_start = max(0, position - cfg.important_lookback + 1)
-        important_high = float(np.nanmax(highs[important_start : position + 1]))
-        important_low = float(np.nanmin(lows[important_start : position + 1]))
-        important_range = important_high - important_low
+        important_high = float(context_highs[position])
+        important_low = float(context_lows[position])
+        important_range = float(context_ranges[position])
 
         if not np.isnan(high_window).any() and highs[position] == np.max(high_window):
             pivots.append(
@@ -311,6 +387,479 @@ def _passes_swing_filter(pivot: _Swing, last: _Swing, cfg: ElliottWaveConfig) ->
     min_by_atr = pivot.atr * cfg.min_swing_atr_multiple if np.isfinite(pivot.atr) else 0.0
     min_by_range = pivot.important_range * cfg.min_swing_range_pct if np.isfinite(pivot.important_range) else 0.0
     return distance >= max(min_by_atr, min_by_range)
+
+
+def _compute_candidate_state(
+    source: pd.DataFrame,
+    swings: list[_Swing],
+    cfg: ElliottWaveConfig,
+    result: pd.DataFrame,
+) -> pd.DataFrame:
+    """Apply the Phase-1 candidate lifecycle without inventing later waves."""
+
+    object_columns = (
+        "ew_confirmed_at",
+        "ew_label",
+        "ew_correction_pattern",
+        "ew_rule_state",
+        "ew_rule_note",
+        "ew_start_confirmed",
+        "ew_anchor_direction",
+        "ew_engine_state",
+        "ew_candidate_label",
+        "ew_pattern",
+        "ew_subtype",
+        "ew_reason_code",
+        "ew_next_condition",
+        "ew_degree",
+        "ew_degree_timeframe",
+        "ew_recount_reason",
+    )
+    for column in object_columns:
+        result[column] = pd.Series(index=result.index, dtype="object")
+
+    result["ew_pivot"] = False
+    result["ew_phase"] = np.nan
+    result["ew_cycle"] = np.nan
+    result["ew_anchor_important_high"] = np.nan
+    result["ew_anchor_important_low"] = np.nan
+    for _, fib_name in _FIB_LEVELS:
+        result[f"ew_anchor_fib_{fib_name}"] = np.nan
+    result["ew_wave_duration"] = np.nan
+    result["ew_time_ratio"] = np.nan
+    result["ew_wave5_min_target"] = np.nan
+    result["ew_wave5_max_target"] = np.nan
+    result["ew_base_locked"] = False
+    result["ew_base_price"] = np.nan
+    result["ew_base_position"] = np.nan
+    result["ew_w1_degree_progress"] = np.nan
+    result["ew_internal_count"] = np.nan
+    result["ew_recount_count"] = 0
+    result["ew_alternate_bases"] = 0
+
+    lifecycle = _run_candidate_state(swings, cfg, source)
+    for event in lifecycle["events"]:
+        event_index = event["index"]
+        if event_index not in result.index:
+            continue
+        for column, value in event["values"].items():
+            result.loc[event_index, column] = value
+
+    active = lifecycle["active"]
+    if active is not None:
+        base = swings[active["start_idx"]]
+        wave1 = swings[active["end_idx"]]
+        direction = "bullish" if active["bullish"] else "bearish"
+        degree_name, degree_timeframe = _degree_metadata(cfg)
+        common = {
+            "ew_pivot": True,
+            "ew_confirmed_at": wave1.confirmed_index,
+            "ew_cycle": lifecycle["recount_count"],
+            "ew_correction_pattern": "TBD - correction classifier not active in Phase 1",
+            "ew_rule_state": "ok",
+            "ew_start_confirmed": True,
+            "ew_anchor_direction": direction,
+            "ew_anchor_important_high": base.important_high,
+            "ew_anchor_important_low": base.important_low,
+            "ew_engine_state": "CONFIRMED",
+            "ew_pattern": "Motive candidate",
+            "ew_subtype": "TBD",
+            "ew_reason_code": "W1_CONFIRMED",
+            "ew_degree": degree_name,
+            "ew_degree_timeframe": degree_timeframe,
+            "ew_base_locked": True,
+            "ew_base_price": base.price,
+            "ew_base_position": base.position,
+            "ew_w1_degree_progress": active["degree_progress"],
+            "ew_internal_count": active["internal_count"],
+            "ew_recount_count": lifecycle["recount_count"],
+            "ew_alternate_bases": lifecycle["alternate_count"],
+        }
+        for fib_ratio, fib_name in _FIB_LEVELS:
+            common[f"ew_anchor_fib_{fib_name}"] = _anchor_fib_price(base, fib_ratio)
+
+        for phase, swing, label in ((0, base, "0"), (1, wave1, "1")):
+            for column, value in common.items():
+                result.loc[swing.index, column] = value
+            result.loc[swing.index, "ew_phase"] = phase
+            result.loc[swing.index, "ew_label"] = label
+            result.loc[swing.index, "ew_candidate_label"] = label
+            result.loc[swing.index, "ew_rule_note"] = active["note"]
+            result.loc[swing.index, "ew_next_condition"] = (
+                "Protect Point 0 and wait for the Wave 2 correction classifiers."
+            )
+
+    result.attrs["elliott_wave_state"] = {
+        "engine": "Candidate State",
+        "phase": "Phase 1 / P0 foundation",
+        "state": "CONFIRMED" if active is not None else lifecycle["final_state"],
+        "base_locked": active is not None,
+        "recount_count": lifecycle["recount_count"],
+        "alternate_base_count": lifecycle["alternate_count"],
+        "last_reason_code": lifecycle["last_reason_code"],
+        "pending_modules": [
+            "Wave 2-5 classifiers",
+            "automatic correction family detection",
+            "diagonal classifier",
+            "full multi-degree routing",
+        ],
+    }
+    return result
+
+
+def _degree_metadata(cfg: ElliottWaveConfig) -> tuple[str, str]:
+    if cfg.degree_preset == "Hardik 1Y":
+        return "Primary", "M"
+    if cfg.degree_preset == "Hardik Swing":
+        return "Intermediate", "D"
+    if cfg.degree_preset in {"Chartking Day Trading", "Hardik Day Trading"}:
+        return "Major", "D"
+    return cfg.degree_name, cfg.degree_timeframe
+
+
+def _run_candidate_state(
+    swings: list[_Swing],
+    cfg: ElliottWaveConfig,
+    source: pd.DataFrame | None = None,
+) -> dict[str, object]:
+    """Return deterministic state transitions for the Phase-1 engine.
+
+    The function is intentionally independent from chart drawing so the hard
+    lifecycle rules can be regression-tested with synthetic confirmed pivots.
+    """
+
+    events: list[dict[str, object]] = []
+    active: dict[str, object] | None = None
+    search_floor = -1
+    recount_count = 0
+    alternate_count = 0
+    last_reason_code = "SEARCHING_FOR_BASE"
+
+    ordered_indices = sorted(
+        range(len(swings)), key=lambda index: swings[index].confirmed_position
+    )
+    processed: list[int] = []
+
+    for swing_index in ordered_indices:
+        swing = swings[swing_index]
+        if active is not None:
+            break_position = _origin_break_position(
+                source,
+                active,
+                swings,
+                int(active["last_checked_position"]) + 1,
+                swing.confirmed_position,
+            )
+            if break_position is not None:
+                break_index = (
+                    source.index[break_position]
+                    if source is not None
+                    else swing.index
+                )
+                recount_count += 1
+                last_reason_code = "W2_ORIGIN_BREAK"
+                events.append(
+                    {
+                        "index": break_index,
+                        "values": {
+                            "ew_engine_state": "INVALID",
+                            "ew_rule_state": "invalid",
+                            "ew_rule_note": "Hard invalidation: price crossed locked Point 0.",
+                            "ew_reason_code": last_reason_code,
+                            "ew_recount_reason": last_reason_code,
+                            "ew_next_condition": "Release the count and search for a new qualified base.",
+                            "ew_recount_count": recount_count,
+                            "ew_base_locked": False,
+                        },
+                    }
+                )
+                search_floor = break_position
+                active = None
+
+        processed.append(swing_index)
+        if active is None:
+            candidate = _candidate_ending_at(
+                swings, processed, swing_index, search_floor, cfg, source
+            )
+            if candidate is not None:
+                active = candidate
+                active["last_checked_position"] = swing.confirmed_position
+                last_reason_code = "W1_CONFIRMED"
+                events.append(
+                    {
+                        "index": swing.index,
+                        "values": {
+                            "ew_engine_state": "CONFIRMED",
+                            "ew_candidate_label": "1",
+                            "ew_pattern": "Motive candidate",
+                            "ew_subtype": "TBD",
+                            "ew_reason_code": last_reason_code,
+                            "ew_rule_state": "ok",
+                            "ew_rule_note": candidate["note"],
+                            "ew_next_condition": "Protect Point 0; classify Wave 2 when its module is enabled.",
+                            "ew_base_locked": True,
+                            "ew_base_price": candidate["base_price"],
+                            "ew_base_position": candidate["base_position"],
+                            "ew_w1_degree_progress": candidate["degree_progress"],
+                            "ew_internal_count": candidate["internal_count"],
+                            "ew_recount_count": recount_count,
+                        },
+                    }
+                )
+            else:
+                events.append(
+                    {
+                        "index": swing.index,
+                        "values": {
+                            "ew_engine_state": "SEARCHING",
+                            "ew_reason_code": "SEARCHING_FOR_BASE",
+                            "ew_next_condition": "Wait for a qualified base and a 5/9/13/17/21-move Wave 1 candidate.",
+                            "ew_recount_count": recount_count,
+                        },
+                    }
+                )
+        else:
+            active["last_checked_position"] = swing.confirmed_position
+            if swing_index != active["end_idx"]:
+                base = swings[int(active["start_idx"])]
+                same_as_base = swing.kind == base.kind
+                alternate = bool(
+                    same_as_base
+                    and swing.important_extreme
+                    and _oscillator_evidence(swings, swing_index, active["bullish"], cfg)[0]
+                )
+                if alternate:
+                    alternate_count += 1
+                    state = "ALTERNATE"
+                    candidate_label = "Alt 0"
+                    reason = "LOCKED_BASE_ALTERNATE"
+                    note = "A new important same-side pivot is stored as an alternate; the locked base is unchanged."
+                else:
+                    state = "FORMING"
+                    candidate_label = "2?" if same_as_base else ""
+                    reason = "W2_CLASSIFIER_PENDING"
+                    note = "The raw pivot is retained, but Phase 1 does not promote it to a main Elliott label."
+                events.append(
+                    {
+                        "index": swing.index,
+                        "values": {
+                            "ew_engine_state": state,
+                            "ew_candidate_label": candidate_label,
+                            "ew_pattern": "TBD",
+                            "ew_subtype": "TBD",
+                            "ew_reason_code": reason,
+                            "ew_rule_state": "pending",
+                            "ew_rule_note": note,
+                            "ew_next_condition": "Run the Wave 2 and correction-family classifiers in Phase 2.",
+                            "ew_base_locked": True,
+                            "ew_base_price": base.price,
+                            "ew_base_position": base.position,
+                            "ew_recount_count": recount_count,
+                            "ew_alternate_bases": alternate_count,
+                        },
+                    }
+                )
+
+    if active is not None and source is not None:
+        tail_break = _origin_break_position(
+            source,
+            active,
+            swings,
+            int(active["last_checked_position"]) + 1,
+            len(source) - 1,
+        )
+        if tail_break is not None:
+            recount_count += 1
+            last_reason_code = "W2_ORIGIN_BREAK"
+            events.append(
+                {
+                    "index": source.index[tail_break],
+                    "values": {
+                        "ew_engine_state": "INVALID",
+                        "ew_rule_state": "invalid",
+                        "ew_rule_note": "Hard invalidation: price crossed locked Point 0.",
+                        "ew_reason_code": last_reason_code,
+                        "ew_recount_reason": last_reason_code,
+                        "ew_next_condition": "Release the count and search for a new qualified base.",
+                        "ew_recount_count": recount_count,
+                        "ew_base_locked": False,
+                    },
+                }
+            )
+            active = None
+
+    return {
+        "active": active,
+        "events": events,
+        "recount_count": recount_count,
+        "alternate_count": alternate_count,
+        "final_state": "SEARCHING" if active is None else "CONFIRMED",
+        "last_reason_code": last_reason_code,
+    }
+
+
+def _candidate_ending_at(
+    swings: list[_Swing],
+    processed_indices: list[int],
+    end_idx: int,
+    search_floor: int,
+    cfg: ElliottWaveConfig,
+    source: pd.DataFrame | None,
+) -> dict[str, object] | None:
+    processed_set = set(processed_indices)
+    for internal_count in cfg.w1_internal_move_counts:
+        start_idx = end_idx - internal_count
+        if start_idx < 0 or start_idx not in processed_set:
+            continue
+        start = swings[start_idx]
+        end = swings[end_idx]
+        if start.position < search_floor or start.kind == end.kind:
+            continue
+        bullish = start.kind == -1 and end.kind == 1 and end.price > start.price
+        bearish = start.kind == 1 and end.kind == -1 and end.price < start.price
+        if not (bullish or bearish):
+            continue
+        if not _anchor_direction_ok(start, bullish, cfg):
+            continue
+
+        distance = abs(end.price - start.price)
+        degree_progress = _safe_ratio(distance, start.important_range)
+        degree_ok = np.isfinite(degree_progress) and degree_progress >= cfg.degree_retrace
+        important_ok = cfg.wave1_start_mode == "Off" or start.important_extreme
+        atr_ok = cfg.important_atr_multiple <= 0 or (
+            np.isfinite(start.atr) and distance >= start.atr * cfg.important_atr_multiple
+        )
+        oscillator_ok, oscillator_note = _oscillator_evidence(
+            swings, start_idx, bullish, cfg
+        )
+        if cfg.wave1_start_mode == "Important swing":
+            oscillator_ok = True
+        if not (degree_ok and important_ok and atr_ok and oscillator_ok):
+            continue
+        if _candidate_crosses_origin(
+            swings, start_idx, end_idx, bullish, source, end.confirmed_position
+        ):
+            continue
+
+        return {
+            "start_idx": start_idx,
+            "end_idx": end_idx,
+            "bullish": bullish,
+            "base_price": start.price,
+            "base_position": start.position,
+            "degree_progress": degree_progress,
+            "internal_count": internal_count,
+            "note": (
+                f"Wave 1 confirmed with {internal_count} internal moves and "
+                f"{degree_progress:.2%} degree progress; {oscillator_note}."
+            ),
+        }
+    return None
+
+
+def _anchor_direction_ok(start: _Swing, bullish: bool, cfg: ElliottWaveConfig) -> bool:
+    return bool(
+        cfg.anchor_direction == "Auto"
+        or (
+            cfg.anchor_direction == "Bullish from important low"
+            and start.kind == -1
+            and bullish
+        )
+        or (
+            cfg.anchor_direction == "Bearish from important high"
+            and start.kind == 1
+            and not bullish
+        )
+    )
+
+
+def _oscillator_evidence(
+    swings: list[_Swing], start_idx: int, bullish: bool, cfg: ElliottWaveConfig
+) -> tuple[bool, str]:
+    start = swings[start_idx]
+    previous = _previous_same_type_swing(swings, start_idx, start.kind)
+    divergence = False
+    if previous is not None:
+        price_extends = start.price < previous.price if bullish else start.price > previous.price
+        rsi_diverges = start.rsi > previous.rsi if bullish else start.rsi < previous.rsi
+        macd_diverges = (
+            start.macd_hist > previous.macd_hist
+            if bullish
+            else start.macd_hist < previous.macd_hist
+        )
+        divergence = bool(price_extends and (rsi_diverges or macd_diverges))
+
+    extreme = bool(start.macd_extreme)
+    mode = cfg.base_oscillator_mode
+    passed = {
+        "Extreme or divergence": extreme or divergence,
+        "Extreme only": extreme,
+        "Divergence only": divergence,
+        "Extreme and divergence": extreme and divergence,
+        "Off": True,
+    }[mode]
+    return bool(passed), (
+        f"base oscillator extreme={'yes' if extreme else 'no'}, "
+        f"divergence={'yes' if divergence else 'no'}"
+    )
+
+
+def _candidate_crosses_origin(
+    swings: list[_Swing],
+    start_idx: int,
+    end_idx: int,
+    bullish: bool,
+    source: pd.DataFrame | None,
+    through_position: int,
+) -> bool:
+    base_price = swings[start_idx].price
+    for swing in swings[start_idx + 1 : end_idx + 1]:
+        if bullish and swing.kind == -1 and swing.price <= base_price:
+            return True
+        if not bullish and swing.kind == 1 and swing.price >= base_price:
+            return True
+    if source is None:
+        return False
+    start_position = swings[start_idx].position + 1
+    end_position = min(through_position, len(source) - 1)
+    if end_position < start_position:
+        return False
+    segment = source.iloc[start_position : end_position + 1]
+    if bullish:
+        return bool((segment["low"].astype(float) <= base_price).any())
+    return bool((segment["high"].astype(float) >= base_price).any())
+
+
+def _origin_break_position(
+    source: pd.DataFrame | None,
+    active: dict[str, object],
+    swings: list[_Swing],
+    start_position: int,
+    end_position: int,
+) -> int | None:
+    base_price = float(active["base_price"])
+    bullish = bool(active["bullish"])
+    if source is not None:
+        start_position = max(0, start_position)
+        end_position = min(end_position, len(source) - 1)
+        if end_position < start_position:
+            return None
+        segment = source.iloc[start_position : end_position + 1]
+        values = segment["low"].astype(float) if bullish else segment["high"].astype(float)
+        broken = values <= base_price if bullish else values >= base_price
+        if broken.any():
+            first_index = broken[broken].index[0]
+            return int(source.index.get_loc(first_index))
+        return None
+
+    for swing in swings:
+        if swing.confirmed_position < start_position or swing.confirmed_position > end_position:
+            continue
+        if bullish and swing.price <= base_price:
+            return swing.position
+        if not bullish and swing.price >= base_price:
+            return swing.position
+    return None
 
 def _correction_count(cfg: ElliottWaveConfig) -> int:
     if cfg.correction_pattern in {"W-X-Y-X-Z", "A-B-C-D-E"}:
@@ -597,12 +1146,14 @@ def _ema(series: pd.Series, length: int) -> pd.Series:
 def _rma(series: pd.Series, length: int) -> pd.Series:
     values = series.astype(float).to_numpy()
     output = np.full(len(values), np.nan, dtype=float)
-    if len(values) < length:
+    valid_positions = np.flatnonzero(~np.isnan(values))
+    if len(valid_positions) < length:
         return pd.Series(output, index=series.index)
 
-    initial = np.nanmean(values[:length])
-    output[length - 1] = initial
-    for position in range(length, len(values)):
+    seed_positions = valid_positions[:length]
+    seed_position = int(seed_positions[-1])
+    output[seed_position] = float(np.mean(values[seed_positions]))
+    for position in range(seed_position + 1, len(values)):
         previous = output[position - 1]
         current = values[position]
         if np.isnan(previous):

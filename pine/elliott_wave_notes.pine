@@ -6,9 +6,20 @@ indicator("Elliott Wave Notes Overlay", overlay=true, max_lines_count=500, max_l
 // - EWT cheat sheet
 // - Rules & Guidelines Summary EW Theory
 // - Time analysis notes
+// - Elliott Wave Master Developer Implementation Bible v2
 //
-// The PDFs are reference material. This script turns the written rules into a
-// deterministic ZigZag-style wave overlay with labels and rule warnings.
+// Candidate State is the default Phase-1/P0 engine. Legacy fixed-cycle mode is
+// retained only for comparison while the later classifiers are implemented.
+
+groupEngine = "Engine / Degree"
+engineMode = input.string("Candidate State (Phase 1)", "Engine mode", options=["Candidate State (Phase 1)", "Legacy fixed cycle"], group=groupEngine)
+degreePreset = input.string("Chartking Day Trading", "Degree preset", options=["Chartking Day Trading", "Hardik 1Y", "Hardik Swing", "Hardik Day Trading", "Manual"], group=groupEngine)
+manualDegreeTimeframe = input.timeframe("D", "Manual Important H/L timeframe", group=groupEngine)
+importantLookbackDays = input.int(144, "Important H/L source bars", minval=10, group=groupEngine, tooltip="Default uses 144 Daily source candles, not 144 local chart candles.")
+baseOscillatorMode = input.string("Extreme or divergence", "Base oscillator rule", options=["Extreme or divergence", "Extreme only", "Divergence only", "Extreme and divergence", "Off"], group=groupEngine)
+showDevelopingCandidates = input.bool(true, "Show developing/alternate status", group=groupEngine)
+degreeSourceTimeframe = degreePreset == "Manual" ? manualDegreeTimeframe : degreePreset == "Hardik 1Y" ? "M" : "D"
+degreeName = degreePreset == "Hardik 1Y" ? "Primary" : degreePreset == "Hardik Swing" ? "Intermediate" : "Major"
 
 groupSwing = "Swing Detection"
 pivotLeft = input.int(5, "Pivot left", minval=1, group=groupSwing)
@@ -28,7 +39,7 @@ macdFast = input.int(12, "MACD fast", minval=1, group=groupStart)
 macdSlow = input.int(26, "MACD slow", minval=1, group=groupStart)
 macdSignal = input.int(9, "MACD signal", minval=1, group=groupStart)
 oscillatorLookback = input.int(100, "MACD extreme lookback", minval=5, group=groupStart)
-importantLookback = input.int(144, "Important High/Low lookback bars", minval=10, group=groupStart)
+importantLookback = input.int(144, "Legacy Important H/L chart bars", minval=10, group=groupStart)
 degreeRetrace = input.float(61.8, "Degree retracement % of Important H/L", minval=1.0, step=0.1, group=groupStart) / 100.0
 
 groupRules = "EW Notes Rules"
@@ -74,7 +85,29 @@ var drawnLabels = array.new_label()
 var targetLines = array.new_line()
 var anchorFibLines = array.new_line()
 var anchorFibLabels = array.new_label()
-var table timeTable = table.new(position.top_right, 2, 4, border_width=1)
+var table timeTable = table.new(position.top_right, 2, 7, border_width=1)
+
+// Phase-1 candidate lifecycle. Confirmed values are copied out of the raw
+// swing arrays so later same-side raw pivot replacements cannot move 0 or 1.
+var string candidateState = "SEARCHING"
+var string lastReasonCode = "SEARCHING_FOR_BASE"
+var bool baseLocked = false
+var bool lockedBullish = false
+var int lockedBaseBar = na
+var float lockedBasePrice = na
+var int lockedW1Bar = na
+var float lockedW1Price = na
+var int lockedAtBar = na
+var float lockedDegreeProgress = na
+var int lockedInternalCount = na
+var float lockedImportantHigh = na
+var float lockedImportantLow = na
+var int searchFloorBar = -1
+var int recountCount = 0
+var int alternateBaseCount = 0
+var int lastInvalidBar = na
+var float lastInvalidPrice = na
+var string developingText = ""
 
 f_label_size() =>
     labelSizeInput == "tiny" ? size.tiny : labelSizeInput == "normal" ? size.normal : size.small
@@ -141,6 +174,87 @@ f_previous_same_type_index(index, pivotType) =>
             if found == -1 and array.get(swingTypes, checkIndex) == pivotType
                 found := checkIndex
     found
+
+f_candidate_oscillator(startIndex, bullish) =>
+    extremeOk = array.get(swingMacdExtreme, startIndex)
+    divergenceOk = false
+    startType = array.get(swingTypes, startIndex)
+    previousIndex = f_previous_same_type_index(startIndex, startType)
+    if previousIndex >= 0
+        startPrice = array.get(swingPrices, startIndex)
+        previousPrice = array.get(swingPrices, previousIndex)
+        startRsi = array.get(swingRsi, startIndex)
+        previousRsi = array.get(swingRsi, previousIndex)
+        startMacd = array.get(swingMacdHist, startIndex)
+        previousMacd = array.get(swingMacdHist, previousIndex)
+        priceExtends = bullish ? startPrice < previousPrice : startPrice > previousPrice
+        rsiDiverges = bullish ? startRsi > previousRsi : startRsi < previousRsi
+        macdDiverges = bullish ? startMacd > previousMacd : startMacd < previousMacd
+        divergenceOk := priceExtends and (rsiDiverges or macdDiverges)
+    oscillatorOk = baseOscillatorMode == "Off" ? true : baseOscillatorMode == "Extreme only" ? extremeOk : baseOscillatorMode == "Divergence only" ? divergenceOk : baseOscillatorMode == "Extreme and divergence" ? extremeOk and divergenceOk : extremeOk or divergenceOk
+    [oscillatorOk, extremeOk, divergenceOk]
+
+f_candidate_crosses_origin(startIndex, endIndex, bullish) =>
+    crossed = false
+    basePrice = array.get(swingPrices, startIndex)
+    if endIndex > startIndex
+        for checkIndex = startIndex + 1 to endIndex
+            checkType = array.get(swingTypes, checkIndex)
+            checkPrice = array.get(swingPrices, checkIndex)
+            if bullish and checkType == -1 and checkPrice <= basePrice
+                crossed := true
+            if not bullish and checkType == 1 and checkPrice >= basePrice
+                crossed := true
+    crossed
+
+f_candidate_for_count(endIndex, internalCount) =>
+    startIndex = endIndex - internalCount
+    valid = false
+    progress = float(na)
+    bullish = false
+    note = ""
+    if startIndex >= 0
+        startBar = array.get(swingBars, startIndex)
+        startPrice = array.get(swingPrices, startIndex)
+        endPrice = array.get(swingPrices, endIndex)
+        startType = array.get(swingTypes, startIndex)
+        endType = array.get(swingTypes, endIndex)
+        bullish := startType == -1 and endType == 1 and endPrice > startPrice
+        bearish = startType == 1 and endType == -1 and endPrice < startPrice
+        directionOk = anchorDirection == "Auto" ? true : anchorDirection == "Bullish from important low" ? bullish : bearish
+        importantOk = wave1StartMode == "Off" or array.get(swingImportantExtreme, startIndex)
+        importantRange = array.get(swingImportantRange, startIndex)
+        distance = math.abs(endPrice - startPrice)
+        progress := not na(importantRange) and importantRange > 0 ? distance / importantRange : na
+        degreeOk = not na(progress) and progress >= degreeRetrace
+        startAtr = array.get(swingAtr, startIndex)
+        atrOk = importantAtrMultiple <= 0 or not na(startAtr) and distance >= startAtr * importantAtrMultiple
+        [oscillatorEvidence, extremeOk, divergenceOk] = f_candidate_oscillator(startIndex, bullish)
+        oscillatorOk = wave1StartMode == "Important swing" ? true : oscillatorEvidence
+        originOk = not f_candidate_crosses_origin(startIndex, endIndex, bullish)
+        floorOk = startBar >= searchFloorBar
+        valid := (bullish or bearish) and directionOk and importantOk and degreeOk and atrOk and oscillatorOk and originOk and floorOk
+        note := "W1 " + str.tostring(internalCount) + " moves | degree " + str.tostring(progress * 100.0, "#.##") + "% | extreme " + (extremeOk ? "yes" : "no") + " | divergence " + (divergenceOk ? "yes" : "no")
+    [valid, startIndex, bullish, progress, note]
+
+f_find_phase1_candidate() =>
+    endIndex = array.size(swingBars) - 1
+    foundStart = -1
+    foundBullish = false
+    foundProgress = float(na)
+    foundCount = -1
+    foundNote = ""
+    if endIndex >= 5
+        for countIndex = 0 to 4
+            internalCount = countIndex == 0 ? 5 : countIndex == 1 ? 9 : countIndex == 2 ? 13 : countIndex == 3 ? 17 : 21
+            [valid, startIndex, bullish, progress, note] = f_candidate_for_count(endIndex, internalCount)
+            if foundStart == -1 and valid
+                foundStart := startIndex
+                foundBullish := bullish
+                foundProgress := progress
+                foundCount := internalCount
+                foundNote := note
+    [foundStart, endIndex, foundBullish, foundProgress, foundCount, foundNote]
 
 f_start_confirmation_note(cycleStart) =>
     note = ""
@@ -407,17 +521,37 @@ f_latest_time_note() =>
 
 f_update_time_table() =>
     if showTimeTable and barstate.islast
-        [state, note] = f_latest_time_note()
-        table.cell(timeTable, 0, 0, "EW Time", text_color=color.white, bgcolor=color.new(color.black, 0))
-        table.cell(timeTable, 1, 0, state, text_color=color.white, bgcolor=state == "WARN" ? color.new(color.orange, 0) : color.new(color.green, 0))
-        table.cell(timeTable, 0, 1, "Rule", text_color=color.white, bgcolor=color.new(color.black, 15))
-        table.cell(timeTable, 1, 1, "Wave 2 <= " + str.tostring(wave2MaxTime, "#.##") + "x Wave 1", text_color=color.white, bgcolor=color.new(color.black, 15))
-        table.cell(timeTable, 0, 2, "Latest", text_color=color.white, bgcolor=color.new(color.black, 15))
-        table.cell(timeTable, 1, 2, note, text_color=color.white, bgcolor=color.new(color.black, 15))
-        table.cell(timeTable, 0, 3, "Correction", text_color=color.white, bgcolor=color.new(color.black, 15))
-        table.cell(timeTable, 1, 3, correctionPattern, text_color=color.white, bgcolor=color.new(color.black, 15))
+        if engineMode == "Candidate State (Phase 1)"
+            stateColor = candidateState == "CONFIRMED" ? color.new(color.green, 0) : candidateState == "INVALID" ? color.new(color.red, 0) : color.new(color.orange, 0)
+            table.cell(timeTable, 0, 0, "EW Phase 1", text_color=color.white, bgcolor=color.new(color.black, 0))
+            table.cell(timeTable, 1, 0, candidateState, text_color=color.white, bgcolor=stateColor)
+            table.cell(timeTable, 0, 1, "Degree", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 1, degreeName + " / " + degreeSourceTimeframe, text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 2, "Point 0", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 2, baseLocked ? "LOCKED " + str.tostring(lockedBasePrice, format.mintick) : "searching", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 3, "W1 evidence", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 3, baseLocked ? str.tostring(lockedInternalCount) + " moves / " + str.tostring(lockedDegreeProgress * 100.0, "#.##") + "%" : "waiting", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 4, "Reason", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 4, lastReasonCode, text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 5, "Recounts / Alt", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 5, str.tostring(recountCount) + " / " + str.tostring(alternateBaseCount), text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 6, "Next", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 6, baseLocked ? "W2 classifier pending" : "qualified 0-1", text_color=color.white, bgcolor=color.new(color.black, 15))
+        else
+            [state, note] = f_latest_time_note()
+            table.cell(timeTable, 0, 0, "EW Time", text_color=color.white, bgcolor=color.new(color.black, 0))
+            table.cell(timeTable, 1, 0, state, text_color=color.white, bgcolor=state == "WARN" ? color.new(color.orange, 0) : color.new(color.green, 0))
+            table.cell(timeTable, 0, 1, "Rule", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 1, "Wave 2 <= " + str.tostring(wave2MaxTime, "#.##") + "x Wave 1", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 2, "Latest", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 2, note, text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 3, "Correction", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 3, correctionPattern, text_color=color.white, bgcolor=color.new(color.black, 15))
+            for row = 4 to 6
+                table.cell(timeTable, 0, row, "", bgcolor=color.new(color.black, 100))
+                table.cell(timeTable, 1, row, "", bgcolor=color.new(color.black, 100))
     else if not showTimeTable and barstate.islast
-        table.clear(timeTable, 0, 0, 1, 3)
+        table.clear(timeTable, 0, 0, 1, 6)
 
 f_label_color(phase, hardInvalid, softWarn) =>
     if hardInvalid
@@ -471,6 +605,44 @@ f_draw_wave5_targets(cycleStart) =>
         array.push(targetLines, minLine)
         array.push(targetLines, maxLine)
 
+f_draw_locked_fib() =>
+    importantRange = lockedImportantHigh - lockedImportantLow
+    if showAnchorFib and baseLocked and not na(importantRange) and importantRange > 0
+        for fibIndex = 0 to 9
+            ratio = f_fib_ratio(fibIndex)
+            price = lockedBullish ? lockedImportantLow + importantRange * ratio : lockedImportantHigh - importantRange * ratio
+            opacity = ratio == 0.0 or ratio == 1.0 ? 35 : 55
+            ln = line.new(lockedBaseBar, price, bar_index, price, extend=extend.right, color=color.new(fibLineColor, opacity), width=1)
+            lb = label.new(bar_index, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.tiny)
+            array.push(anchorFibLines, ln)
+            array.push(anchorFibLabels, lb)
+
+f_redraw_candidate() =>
+    f_clear_drawings()
+    if baseLocked
+        ln = line.new(lockedBaseBar, lockedBasePrice, lockedW1Bar, lockedW1Price, color=impulseLineColor, width=3)
+        array.push(drawnLines, ln)
+        baseStyle = lockedBullish ? label.style_label_up : label.style_label_down
+        w1Style = lockedBullish ? label.style_label_down : label.style_label_up
+        baseLabel = label.new(lockedBaseBar, lockedBasePrice, text="0", style=baseStyle, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip="Locked Point 0. It changes only after a hard origin invalidation.")
+        w1Tooltip = "CONFIRMED | " + str.tostring(lockedInternalCount) + " internal moves | degree " + str.tostring(lockedDegreeProgress * 100.0, "#.##") + "%"
+        w1Label = label.new(lockedW1Bar, lockedW1Price, text="1", style=w1Style, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=w1Tooltip)
+        array.push(drawnLabels, baseLabel)
+        array.push(drawnLabels, w1Label)
+        f_draw_locked_fib()
+        if showDevelopingCandidates and str.length(developingText) > 0 and array.size(swingBars) > 0
+            latestIndex = array.size(swingBars) - 1
+            latestBar = array.get(swingBars, latestIndex)
+            if latestBar != lockedW1Bar
+                latestPrice = array.get(swingPrices, latestIndex)
+                latestType = array.get(swingTypes, latestIndex)
+                latestStyle = latestType == 1 ? label.style_label_down : label.style_label_up
+                candidateLabel = label.new(latestBar, latestPrice, text=developingText, style=latestStyle, yloc=yloc.price, color=color.new(color.gray, 35), textcolor=color.white, size=size.tiny, tooltip="Raw pivot only; not promoted to a main Elliott label in Phase 1.")
+                array.push(drawnLabels, candidateLabel)
+    if not na(lastInvalidBar)
+        invalidLabel = label.new(lastInvalidBar, lastInvalidPrice, text="INVALID\nrecount " + str.tostring(recountCount), style=label.style_label_down, yloc=yloc.price, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny, tooltip="W2_ORIGIN_BREAK: the locked Point 0 was crossed and released.")
+        array.push(drawnLabels, invalidLabel)
+
 f_redraw() =>
     f_clear_drawings()
     count = array.size(swingBars)
@@ -511,8 +683,12 @@ macdHist = macdLine - macdSignalLine
 pivotAtr = atrValue[pivotRight]
 pivotRsi = rsiValue[pivotRight]
 pivotMacdHist = macdHist[pivotRight]
-importantHighAtPivot = ta.highest(high, importantLookback)[pivotRight]
-importantLowAtPivot = ta.lowest(low, importantLookback)[pivotRight]
+degreeImportantHigh = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.highest(high, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+degreeImportantLow = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.lowest(low, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+importantHighSeries = engineMode == "Candidate State (Phase 1)" ? degreeImportantHigh : ta.highest(high, importantLookback)
+importantLowSeries = engineMode == "Candidate State (Phase 1)" ? degreeImportantLow : ta.lowest(low, importantLookback)
+importantHighAtPivot = importantHighSeries[pivotRight]
+importantLowAtPivot = importantLowSeries[pivotRight]
 importantRangeAtPivot = importantHighAtPivot - importantLowAtPivot
 highIsImportant = pivotHigh >= importantHighAtPivot
 lowIsImportant = pivotLow <= importantLowAtPivot
@@ -529,7 +705,69 @@ else if not na(pivotHigh)
 else if not na(pivotLow)
     changed := f_upsert_swing(pivotBar, pivotLow, -1, pivotAtr, pivotMacdHist, pivotRsi, macdLowestAtPivot, lowIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot)
 
+originBroken = engineMode == "Candidate State (Phase 1)" and baseLocked and bar_index > lockedAtBar and (lockedBullish ? low <= lockedBasePrice : high >= lockedBasePrice)
+if originBroken
+    baseLocked := false
+    candidateState := "INVALID"
+    lastReasonCode := "W2_ORIGIN_BREAK"
+    recountCount += 1
+    searchFloorBar := bar_index
+    lastInvalidBar := bar_index
+    lastInvalidPrice := lockedBullish ? low : high
+    developingText := ""
+    lockedBaseBar := na
+    lockedBasePrice := na
+    lockedW1Bar := na
+    lockedW1Price := na
+    lockedAtBar := na
+    lockedDegreeProgress := na
+    lockedInternalCount := na
+    lockedImportantHigh := na
+    lockedImportantLow := na
+    f_redraw_candidate()
+
 if changed
-    f_redraw()
+    if engineMode == "Candidate State (Phase 1)"
+        if baseLocked
+            latestIndex = array.size(swingBars) - 1
+            latestType = array.get(swingTypes, latestIndex)
+            baseType = lockedBullish ? -1 : 1
+            sameAsBase = latestType == baseType
+            latestImportant = array.get(swingImportantExtreme, latestIndex)
+            [latestOscillatorOk, latestExtreme, latestDivergence] = f_candidate_oscillator(latestIndex, lockedBullish)
+            isAlternate = sameAsBase and latestImportant and latestOscillatorOk
+            if isAlternate
+                alternateBaseCount += 1
+                candidateState := "ALTERNATE"
+                lastReasonCode := "LOCKED_BASE_ALTERNATE"
+                developingText := "Alt 0"
+            else
+                candidateState := "FORMING"
+                lastReasonCode := "W2_CLASSIFIER_PENDING"
+                developingText := sameAsBase ? "2?" : "raw"
+        else
+            [candidateStart, candidateEnd, candidateBullish, candidateProgress, candidateCount, candidateNote] = f_find_phase1_candidate()
+            if candidateStart >= 0
+                baseLocked := true
+                lockedBullish := candidateBullish
+                lockedBaseBar := array.get(swingBars, candidateStart)
+                lockedBasePrice := array.get(swingPrices, candidateStart)
+                lockedW1Bar := array.get(swingBars, candidateEnd)
+                lockedW1Price := array.get(swingPrices, candidateEnd)
+                lockedAtBar := bar_index
+                lockedDegreeProgress := candidateProgress
+                lockedInternalCount := candidateCount
+                lockedImportantHigh := array.get(swingImportantHigh, candidateStart)
+                lockedImportantLow := array.get(swingImportantLow, candidateStart)
+                candidateState := "CONFIRMED"
+                lastReasonCode := "W1_CONFIRMED"
+                developingText := ""
+            else if not originBroken
+                candidateState := "SEARCHING"
+                lastReasonCode := "SEARCHING_FOR_BASE"
+                developingText := ""
+        f_redraw_candidate()
+    else
+        f_redraw()
 
 f_update_time_table()
