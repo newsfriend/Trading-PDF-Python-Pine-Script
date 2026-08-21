@@ -20,8 +20,8 @@ setup collection is stored in the repository for future development.
 | --- | --- | --- | --- |
 | GEO P Momentum signals | Indicator | Signal engine | Implemented |
 | GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
-| Elliott Wave engine | Phase-1 state overlay | Phase-1 state engine | P0 complete; later classifiers pending |
-| Remaining PDF setups | — | — | Reference material only |
+| Elliott Wave engine | Core impulse overlay | Core impulse state engine | P0 complete; supported Wave 1-5 paths implemented |
+| Remaining PDF setups | - | - | Reference material only |
 
 ## GEO P Momentum
 
@@ -46,8 +46,8 @@ are documented in [docs/geo_p_momentum_pdf_rules.md](docs/geo_p_momentum_pdf_rul
 ## Elliott Wave Notes
 
 The Elliott Wave implementation is a separate analytical overlay; it does not
-generate GEO P Momentum BUY or SELL signals. Its default Phase-1 engine now
-provides:
+generate GEO P Momentum BUY or SELL signals. Its source-locked candidate engine
+now provides:
 
 - Confirmed and ATR-filtered swing detection.
 - Separate raw pivots and main Elliott labels.
@@ -57,12 +57,19 @@ provides:
 - Wave 1 candidates with 5/9/13/17/21 internal moves and 61.8% degree progress.
 - Persistent Point 0/Wave 1 locking so later small swings cannot move the count.
 - Hard origin invalidation, reason codes, alternate bases, and controlled recounts.
-- State/debug output for `SEARCHING`, `FORMING`, `CONFIRMED`, `ALTERNATE`, and
-  `INVALID`.
+- Wave 2 and Wave 4 correction containers with parallel simple Zig-Zag/Flat
+  candidates and pattern-specific B-wave ranges.
+- Trending/terminal Wave 3 and normal/truncated Wave 5 paths, including
+  extension, overlap, shortest-wave, and divergence checks.
+- Persistent labels 0-5 with a parent-state gate that prevents premature Wave 5.
+- Auditable pattern, subtype, Fib, time, momentum, reason, and next-condition
+  output.
 
-Wave 2-5 and the automatic correction, triangle, and diagonal classifiers are
-still later phases. The old modulo-style full label sequence remains available
-only as `Legacy fixed cycle` comparison mode and is not the accepted engine.
+This is the core impulse foundation, not the complete Elliott Wave deliverable.
+Complex corrections, W-X-Y/triples, triangle variants, full diagonals,
+multi-degree routing, parity validation, and backtesting remain later phases.
+Unsupported paths remain visibly blocked instead of being guessed. The old
+modulo-style sequence is available only as `Legacy fixed cycle` comparison mode.
 
 See [docs/elliott_wave_notes_rules.md](docs/elliott_wave_notes_rules.md) for the
 implemented rules and assumptions.
@@ -71,29 +78,29 @@ implemented rules and assumptions.
 
 ```text
 Trading-PDF-Python/
-├── pine/
-│   ├── geo_p_momentum.pine
-│   ├── geo_p_momentum_strategy.pine
-│   └── elliott_wave_notes.pine
-├── python/
-│   ├── __init__.py
-│   ├── geo_p_momentum.py
-│   └── elliott_wave_notes.py
-├── docs/
-│   ├── geo_p_momentum_pdf_rules.md
-│   ├── elliott_wave_notes_rules.md
-│   ├── elliott_wave_implementation_checklist_v2.md
-│   └── first_task_acceptance_checklist.md
-├── tests/
-│   ├── test_elliott_wave_state_engine.py
-│   └── test_elliott_wave_pine_contract.py
-├── assest/
-│   ├── All Setups/
-│   ├── Elliot Wave First/
-│   ├── Elliot Wave Second/
-│   └── screen/
-├── requirements.txt
-└── README.md
+|-- pine/
+|   |-- geo_p_momentum.pine
+|   |-- geo_p_momentum_strategy.pine
+|   `-- elliott_wave_notes.pine
+|-- python/
+|   |-- __init__.py
+|   |-- geo_p_momentum.py
+|   `-- elliott_wave_notes.py
+|-- docs/
+|   |-- geo_p_momentum_pdf_rules.md
+|   |-- elliott_wave_notes_rules.md
+|   |-- elliott_wave_implementation_checklist_v2.md
+|   `-- first_task_acceptance_checklist.md
+|-- tests/
+|   |-- test_elliott_wave_state_engine.py
+|   `-- test_elliott_wave_pine_contract.py
+|-- assest/
+|   |-- All Setups/
+|   |-- Elliot Wave First/
+|   |-- Elliot Wave Second/
+|   `-- screen/
+|-- requirements.txt
+`-- README.md
 ```
 
 The existing `assest` directory name is preserved to avoid breaking project

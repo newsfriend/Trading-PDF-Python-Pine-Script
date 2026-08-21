@@ -11,10 +11,10 @@ the client.
 - Paste `pine/geo_p_momentum.pine` only if the client wants signal-only alerts.
 - Use the signal-only indicator when validating the screenshot examples because it does not suppress labels with stop/target checks.
 - Paste `pine/elliott_wave_notes.pine` separately when validating the Elliott Wave notes overlay.
-- Keep `Engine mode = Candidate State (Phase 1)` for developer-manual validation.
-- Confirm it locks only Point 0/Wave 1, shows degree/evidence/reason state, keeps
-  later raw pivots as developing or alternate, and releases the count after a
-  hard Point-0 break.
+- Keep `Engine mode = Candidate State (Core Impulse)` for V3.1 validation.
+- Confirm it locks Point 0 and each supported Wave 1-5 label only after the
+  relevant parent-state gate passes, keeps other raw pivots developing or
+  alternate, and releases an unfinished count after a hard Point-0 break.
 - Use `Legacy fixed cycle` only to compare with old screenshots; it is not an
   acceptance mode for the new manual.
 
@@ -44,11 +44,11 @@ the client.
 - Run `python/geo_p_momentum.py` against that CSV.
 - Compare `buy_signal`, `sell_signal`, stop, and target-1 values to the Pine strategy.
 - Run `compute_elliott_waves` on the same candles when validating raw pivots,
-  locked `0/1` labels, state, reason code, degree progress, alternates, and
+  locked `0-5` labels, parent state, reason code, Fib evidence, alternates, and
   controlled recounts.
-- For Phase 1, verify engine mode, degree preset/source, 144-day context,
-  61.8% progress, 5/9/13/17/21 internal count, oscillator mode, direction,
-  ATR filter, and pivot sensitivity against the client chart.
+- Verify the degree source and 144-day context first, then validate Wave 2/4
+  correction completion, Wave 3 subtype, Wave 5 subtype, oscillator/divergence
+  mode, and pivot sensitivity against the client chart.
 
 ## Client Confirmation
 
@@ -66,7 +66,8 @@ Do not ask for `SOBBO/SOBBD` or `TMG/TMJ` unless the client later reverses the
 latest instruction; those terms are intentionally ignored in this version.
 
 The first setup can be called fully verified after Pine and Python produce the
-same signal candles on identical OHLCV data. Elliott Wave Phase 1 can be called
-accepted only after its regression tests pass, Pine compiles in TradingView,
-and the client confirms the same locked base/invalidation behavior on identical
-market data. Later wave/correction modules remain outside that acceptance.
+same signal candles on identical OHLCV data. The Elliott Wave core impulse
+phase can be accepted only after its regression tests pass, Pine compiles in
+TradingView, and the client confirms matching locked counts on identical market
+data. Complex correction, diagonal, parity, and backtesting modules remain
+outside that acceptance.

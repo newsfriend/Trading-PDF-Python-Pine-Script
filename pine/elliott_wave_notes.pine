@@ -6,13 +6,13 @@ indicator("Elliott Wave Notes Overlay", overlay=true, max_lines_count=500, max_l
 // - EWT cheat sheet
 // - Rules & Guidelines Summary EW Theory
 // - Time analysis notes
-// - Elliott Wave Master Developer Implementation Bible v2
+// - Elliott Wave / NeoWave Source-Locked Developer Specification V3.1
 //
-// Candidate State is the default Phase-1/P0 engine. Legacy fixed-cycle mode is
-// retained only for comparison while the later classifiers are implemented.
+// Candidate State is the default source-locked engine. Legacy fixed-cycle mode
+// is retained only for comparison and is not an acceptance mode.
 
 groupEngine = "Engine / Degree"
-engineMode = input.string("Candidate State (Phase 1)", "Engine mode", options=["Candidate State (Phase 1)", "Legacy fixed cycle"], group=groupEngine)
+engineMode = input.string("Candidate State (Core Impulse)", "Engine mode", options=["Candidate State (Core Impulse)", "Candidate State (Phase 1)", "Legacy fixed cycle"], group=groupEngine)
 degreePreset = input.string("Chartking Day Trading", "Degree preset", options=["Chartking Day Trading", "Hardik 1Y", "Hardik Swing", "Hardik Day Trading", "Manual"], group=groupEngine)
 manualDegreeTimeframe = input.timeframe("D", "Manual Important H/L timeframe", group=groupEngine)
 importantLookbackDays = input.int(144, "Important H/L source bars", minval=10, group=groupEngine, tooltip="Default uses 144 Daily source candles, not 144 local chart candles.")
@@ -24,7 +24,7 @@ degreeName = degreePreset == "Hardik 1Y" ? "Primary" : degreePreset == "Hardik S
 groupSwing = "Swing Detection"
 pivotLeft = input.int(5, "Pivot left", minval=1, group=groupSwing)
 pivotRight = input.int(5, "Pivot right", minval=1, group=groupSwing)
-maxSwings = input.int(45, "Maximum swings to draw", minval=9, maxval=120, group=groupSwing)
+maxSwings = input.int(120, "Maximum swings retained", minval=45, maxval=120, group=groupSwing, tooltip="Core impulse extensions can require up to 85 raw pivots before Waves 1-5 are complete.")
 minSwingAtrMultiple = input.float(1.5, "Minimum swing ATR multiple", minval=0.0, step=0.1, group=groupSwing)
 minSwingRangePct = input.float(3.0, "Minimum swing % of Important H/L", minval=0.0, step=0.1, group=groupSwing) / 100.0
 showZero = input.bool(false, "Show 0 labels", group=groupSwing)
@@ -44,16 +44,27 @@ degreeRetrace = input.float(61.8, "Degree retracement % of Important H/L", minva
 
 groupRules = "EW Notes Rules"
 showRuleWarnings = input.bool(true, "Color rule warnings", group=groupRules)
-wave2MinRetrace = input.float(14.0, "Wave 2 minimum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
+wave2MinimumMode = input.string("Chartking", "Wave 2 minimum source", options=["Chartking", "Hardik", "Legacy 14%"], group=groupRules)
+wave2MinRetrace = input.float(23.6, "Wave 2 normal minimum %", minval=0.0, step=0.1, group=groupRules) / 100.0
+wave2MaxRetrace = input.float(81.2, "Wave 2 normal maximum %", minval=1.0, step=0.1, group=groupRules) / 100.0
+microscopicRetrace = input.float(14.0, "Wave 2 microscopic clue %", minval=0.0, step=0.1, group=groupRules) / 100.0
+microscopicTolerance = input.float(2.0, "Microscopic tolerance %", minval=0.0, step=0.1, group=groupRules) / 100.0
 wave2MaxTime = input.float(2.0, "Wave 2 maximum time x Wave 1", minval=0.1, step=0.1, group=groupRules)
 wave3MinExtension = input.float(161.8, "Wave 3 expected minimum % of Wave 1", minval=1.0, step=0.1, group=groupRules) / 100.0
-wave4MinRetrace = input.float(14.0, "Wave 4 minimum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
+wave3TerminalMin = input.float(61.8, "Wave 3 terminal minimum %", minval=1.0, step=0.1, group=groupRules) / 100.0
+wave3MaximumMode = input.string("Chartking 2700%", "Wave 3 maximum source", options=["Chartking 2700%", "Impulse 2100%"], group=groupRules)
+wave4MinimumMode = input.string("Chartking", "Wave 4 minimum source", options=["Chartking", "Hardik", "Extension context"], group=groupRules)
+wave4MinRetrace = input.float(23.6, "Wave 4 normal minimum %", minval=0.0, step=0.1, group=groupRules) / 100.0
 wave4MaxRetrace = input.float(50.0, "Wave 4 usual maximum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
+wave4TerminalMaxRetrace = input.float(61.8, "Wave 4 terminal maximum %", minval=0.0, step=0.1, group=groupRules) / 100.0
 flatAMaxRetrace = input.float(61.8, "Flat A maximum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
 flatBMinRetrace = input.float(61.8, "Flat B minimum retrace %", minval=0.0, step=0.1, group=groupRules) / 100.0
 flatBMaxRetrace = input.float(111.0, "Flat B maximum retrace %", minval=1.0, step=0.1, group=groupRules) / 100.0
 wave5MinExtension = input.float(127.0, "Wave 5 minimum % of Wave 3-4", minval=1.0, step=0.1, group=groupRules) / 100.0
 wave5MaxExtension = input.float(261.8, "Wave 5 maximum % of Wave 3-4", minval=1.0, step=0.1, group=groupRules) / 100.0
+wave5DivergenceMode = input.string("Support", "Wave 5 divergence rule", options=["Support", "Required", "Off"], group=groupRules)
+timeRuleMode = input.string("Diagnostic all sources", "Time rule source", options=["Diagnostic all sources", "Chartking", "Hardik", "Separate Time Analysis"], group=groupRules)
+hpSignalMode = input.string("Disabled until project filters", "HP signal mode", options=["Disabled until project filters", "Structure confirmation only"], group=groupRules)
 timeTolerance = input.float(25.0, "Time rule tolerance %", minval=0.0, step=1.0, group=groupRules) / 100.0
 
 groupDisplay = "Display"
@@ -87,8 +98,8 @@ var anchorFibLines = array.new_line()
 var anchorFibLabels = array.new_label()
 var table timeTable = table.new(position.top_right, 2, 7, border_width=1)
 
-// Phase-1 candidate lifecycle. Confirmed values are copied out of the raw
-// swing arrays so later same-side raw pivot replacements cannot move 0 or 1.
+// Confirmed values are copied out of the raw swing arrays so later raw pivot
+// replacements cannot move any locked main-degree label.
 var string candidateState = "SEARCHING"
 var string lastReasonCode = "SEARCHING_FOR_BASE"
 var bool baseLocked = false
@@ -108,6 +119,37 @@ var int alternateBaseCount = 0
 var int lastInvalidBar = na
 var float lastInvalidPrice = na
 var string developingText = ""
+var string engineStage = "SEARCHING"
+var string primaryPattern = ""
+var string alternatePattern = ""
+var string currentFibAnchor = ""
+var float currentFibValue = na
+var float currentTimeValue = na
+var string currentInternalPattern = ""
+var int currentInternalCount = 0
+var string currentMacdState = ""
+var string currentNextCondition = "Need qualified Point 0 and Wave 1"
+var string hpSignalState = ""
+var int lockedW2Bar = na
+var float lockedW2Price = na
+var string lockedW2Pattern = ""
+var string lockedW2Subtype = ""
+var int lockedW2InternalCount = 0
+var float lockedW2Retrace = na
+var int lockedW3Bar = na
+var float lockedW3Price = na
+var string lockedW3Subtype = ""
+var int lockedW3InternalCount = 0
+var float lockedW3Ratio = na
+var float lockedW3Macd = na
+var int lockedW4Bar = na
+var float lockedW4Price = na
+var string lockedW4Pattern = ""
+var float lockedW4Retrace = na
+var int lockedW5Bar = na
+var float lockedW5Price = na
+var string lockedW5Subtype = ""
+var float lockedW5Ratio = na
 
 f_label_size() =>
     labelSizeInput == "tiny" ? size.tiny : labelSizeInput == "normal" ? size.normal : size.small
@@ -256,6 +298,114 @@ f_find_phase1_candidate() =>
                 foundNote := note
     [foundStart, endIndex, foundBullish, foundProgress, foundCount, foundNote]
 
+f_is_candidate_mode() =>
+    engineMode != "Legacy fixed cycle"
+
+f_impulse_count(optionIndex) =>
+    optionIndex == 0 ? 5 : optionIndex == 1 ? 9 : optionIndex == 2 ? 13 : optionIndex == 3 ? 17 : 21
+
+f_correction_count_option(optionIndex) =>
+    optionIndex == 0 ? 3 : optionIndex == 1 ? 7 : 11
+
+f_is_impulse_count(count) =>
+    count == 5 or count == 9 or count == 13 or count == 17 or count == 21
+
+f_index_for_bar(targetBar) =>
+    found = -1
+    if array.size(swingBars) > 0
+        for i = 0 to array.size(swingBars) - 1
+            if array.get(swingBars, i) == targetBar
+                found := i
+    found
+
+f_ratio(numerator, denominator) =>
+    denominator == 0 or na(denominator) ? na : numerator / denominator
+
+f_correction_ratios(startIndex, aCount, bCount, cCount) =>
+    startPrice = array.get(swingPrices, startIndex)
+    aPrice = array.get(swingPrices, startIndex + aCount)
+    bPrice = array.get(swingPrices, startIndex + aCount + bCount)
+    cPrice = array.get(swingPrices, startIndex + aCount + bCount + cCount)
+    aLength = math.abs(aPrice - startPrice)
+    bLength = math.abs(bPrice - aPrice)
+    cLength = math.abs(cPrice - bPrice)
+    [f_ratio(bLength, aLength), f_ratio(cLength, aLength), f_ratio(cLength, bLength)]
+
+f_eval_simple_correction(startIndex, endIndex) =>
+    confirmed = false
+    primary = "Zig-Zag / Flat"
+    alternate = ""
+    selectedBRatio = float(na)
+    internalPattern = "parallel candidates"
+    reason = "C_INTERNAL_INCOMPLETE"
+    if startIndex >= 0 and endIndex > startIndex
+        for aOption = 0 to 4
+            aCount = f_impulse_count(aOption)
+            for bOption = 0 to 2
+                bCount = f_correction_count_option(bOption)
+                for cOption = 0 to 4
+                    cCount = f_impulse_count(cOption)
+                    if startIndex + aCount + bCount + cCount == endIndex
+                        [bRatio, cVsA, cVsB] = f_correction_ratios(startIndex, aCount, bCount, cCount)
+                        zigPass = not na(bRatio) and bRatio >= 0.01 and bRatio <= 0.50 and not na(cVsB) and cVsB >= 1.27
+                        if zigPass
+                            if not confirmed
+                                confirmed := true
+                                primary := "Zig-Zag"
+                                selectedBRatio := bRatio
+                                internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount)
+                                reason := "CORRECTION_CONFIRMED"
+                            else
+                                alternate := "Zig-Zag"
+        for aOption = 0 to 2
+            aCount = f_correction_count_option(aOption)
+            for bOption = 0 to 2
+                bCount = f_correction_count_option(bOption)
+                for cOption = 0 to 4
+                    cCount = f_impulse_count(cOption)
+                    if startIndex + aCount + bCount + cCount == endIndex
+                        [bRatio, cVsA, cVsB] = f_correction_ratios(startIndex, aCount, bCount, cCount)
+                        flatPass = not na(bRatio) and bRatio >= flatBMinRetrace and bRatio <= flatBMaxRetrace and not na(cVsA) and cVsA >= 0.618 and cVsA <= 2.618
+                        if flatPass
+                            if not confirmed
+                                confirmed := true
+                                primary := "Flat"
+                                selectedBRatio := bRatio
+                                internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount)
+                                reason := "CORRECTION_CONFIRMED"
+                            else
+                                alternate := "Flat"
+        if not confirmed and endIndex - startIndex >= 6
+            aPrice = array.get(swingPrices, startIndex + 3)
+            bPrice = array.get(swingPrices, startIndex + 6)
+            startPrice = array.get(swingPrices, startIndex)
+            selectedBRatio := f_ratio(math.abs(bPrice - aPrice), math.abs(aPrice - startPrice))
+            if not na(selectedBRatio) and selectedBRatio > flatBMaxRetrace
+                reason := "FLAT_B_GT_111"
+    [confirmed, primary, alternate, selectedBRatio, internalPattern, math.max(0, endIndex - startIndex), reason]
+
+f_duration_ratio(startIndex, endIndex, referenceStartIndex, referenceEndIndex) =>
+    duration = math.max(1, array.get(swingBars, endIndex) - array.get(swingBars, startIndex))
+    reference = math.max(1, array.get(swingBars, referenceEndIndex) - array.get(swingBars, referenceStartIndex))
+    duration / reference
+
+f_internal_four_overlaps_one(startIndex, endIndex, bullish) =>
+    overlaps = false
+    if endIndex - startIndex >= 5
+        internalOne = array.get(swingPrices, startIndex + 1)
+        internalFour = array.get(swingPrices, endIndex - 1)
+        overlaps := bullish ? internalFour <= internalOne : internalFour >= internalOne
+    overlaps
+
+f_w2_minimum() =>
+    wave2MinimumMode == "Chartking" ? wave2MinRetrace : 0.14
+
+f_w4_minimum() =>
+    wave4MinimumMode == "Chartking" ? wave4MinRetrace : 0.14
+
+f_w3_maximum() =>
+    wave3MaximumMode == "Chartking 2700%" ? 27.0 : 21.0
+
 f_start_confirmation_note(cycleStart) =>
     note = ""
     startOk = wave1StartMode == "Off"
@@ -335,7 +485,9 @@ f_upsert_swing(pivotBar, pivotPrice, pivotType, pivotAtr, pivotMacdHist, pivotRs
         lastPrice = array.get(swingPrices, count - 1)
         if pivotType == lastType
             moreExtreme = pivotType == 1 ? pivotPrice > lastPrice : pivotPrice < lastPrice
-            if moreExtreme
+            lastBar = array.get(swingBars, count - 1)
+            lockedMainEndpoint = baseLocked and (lastBar == lockedW1Bar or lastBar == lockedW2Bar or lastBar == lockedW3Bar or lastBar == lockedW4Bar or lastBar == lockedW5Bar)
+            if moreExtreme and not lockedMainEndpoint
                 array.set(swingBars, count - 1, pivotBar)
                 array.set(swingPrices, count - 1, pivotPrice)
                 array.set(swingTypes, count - 1, pivotType)
@@ -521,22 +673,25 @@ f_latest_time_note() =>
 
 f_update_time_table() =>
     if showTimeTable and barstate.islast
-        if engineMode == "Candidate State (Phase 1)"
+        if f_is_candidate_mode()
             stateColor = candidateState == "CONFIRMED" ? color.new(color.green, 0) : candidateState == "INVALID" ? color.new(color.red, 0) : color.new(color.orange, 0)
-            table.cell(timeTable, 0, 0, "EW Phase 1", text_color=color.white, bgcolor=color.new(color.black, 0))
+            fibEvidence = str.length(currentFibAnchor) > 0 and not na(currentFibValue) ? currentFibAnchor + " " + str.tostring(currentFibValue * 100.0, "#.##") + "%" : "waiting"
+            patternEvidence = str.length(alternatePattern) > 0 ? primaryPattern + " | alt " + alternatePattern : primaryPattern
+            supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "")
+            table.cell(timeTable, 0, 0, engineMode == "Candidate State (Core Impulse)" ? "EW Core" : "EW Phase 1", text_color=color.white, bgcolor=color.new(color.black, 0))
             table.cell(timeTable, 1, 0, candidateState, text_color=color.white, bgcolor=stateColor)
             table.cell(timeTable, 0, 1, "Degree", text_color=color.white, bgcolor=color.new(color.black, 15))
             table.cell(timeTable, 1, 1, degreeName + " / " + degreeSourceTimeframe, text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 2, "Point 0", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 2, baseLocked ? "LOCKED " + str.tostring(lockedBasePrice, format.mintick) : "searching", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 3, "W1 evidence", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 3, baseLocked ? str.tostring(lockedInternalCount) + " moves / " + str.tostring(lockedDegreeProgress * 100.0, "#.##") + "%" : "waiting", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 4, "Reason", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 4, lastReasonCode, text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 5, "Recounts / Alt", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 5, str.tostring(recountCount) + " / " + str.tostring(alternateBaseCount), text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 2, "Parent state", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 2, engineStage + (baseLocked ? " | P0 " + str.tostring(lockedBasePrice, format.mintick) : ""), text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 3, "Pattern", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 3, str.length(patternEvidence) > 0 ? patternEvidence : "waiting", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 4, "Evidence", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 4, fibEvidence + (str.length(currentInternalPattern) > 0 ? " | " + currentInternalPattern : "") + supportEvidence, text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 5, "Reason / recount", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 5, lastReasonCode + " | " + str.tostring(recountCount) + "/" + str.tostring(alternateBaseCount), text_color=color.white, bgcolor=color.new(color.black, 15))
             table.cell(timeTable, 0, 6, "Next", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 6, baseLocked ? "W2 classifier pending" : "qualified 0-1", text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 1, 6, currentNextCondition, text_color=color.white, bgcolor=color.new(color.black, 15))
         else
             [state, note] = f_latest_time_note()
             table.cell(timeTable, 0, 0, "EW Time", text_color=color.white, bgcolor=color.new(color.black, 0))
@@ -629,15 +784,48 @@ f_redraw_candidate() =>
         w1Label = label.new(lockedW1Bar, lockedW1Price, text="1", style=w1Style, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=w1Tooltip)
         array.push(drawnLabels, baseLabel)
         array.push(drawnLabels, w1Label)
+        if not na(lockedW2Bar)
+            w2Line = line.new(lockedW1Bar, lockedW1Price, lockedW2Bar, lockedW2Price, color=correctionLineColor, width=3)
+            w2Style = lockedBullish ? label.style_label_up : label.style_label_down
+            w2Label = label.new(lockedW2Bar, lockedW2Price, text="2", style=w2Style, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW2Pattern + " | " + lockedW2Subtype + " | retrace " + str.tostring(lockedW2Retrace * 100.0, "#.##") + "%")
+            array.push(drawnLines, w2Line)
+            array.push(drawnLabels, w2Label)
+        if not na(lockedW3Bar)
+            w3Line = line.new(lockedW2Bar, lockedW2Price, lockedW3Bar, lockedW3Price, color=impulseLineColor, width=3)
+            w3Style = lockedBullish ? label.style_label_down : label.style_label_up
+            w3Label = label.new(lockedW3Bar, lockedW3Price, text="3", style=w3Style, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW3Subtype + " | W1 projection " + str.tostring(lockedW3Ratio * 100.0, "#.##") + "%")
+            array.push(drawnLines, w3Line)
+            array.push(drawnLabels, w3Label)
+        if not na(lockedW4Bar)
+            w4Line = line.new(lockedW3Bar, lockedW3Price, lockedW4Bar, lockedW4Price, color=correctionLineColor, width=3)
+            w4Style = lockedBullish ? label.style_label_up : label.style_label_down
+            w4Label = label.new(lockedW4Bar, lockedW4Price, text="4", style=w4Style, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW4Pattern + " | retrace " + str.tostring(lockedW4Retrace * 100.0, "#.##") + "%")
+            array.push(drawnLines, w4Line)
+            array.push(drawnLabels, w4Label)
+            if showTargets
+                targetBase = math.abs(lockedW3Price - lockedW4Price)
+                targetMin = lockedBullish ? lockedW4Price + targetBase * wave5MinExtension : lockedW4Price - targetBase * wave5MinExtension
+                targetMax = lockedBullish ? lockedW4Price + targetBase * wave5MaxExtension : lockedW4Price - targetBase * wave5MaxExtension
+                targetMinLine = line.new(lockedW4Bar, targetMin, bar_index, targetMin, extend=extend.right, color=color.new(color.green, 45), style=line.style_dashed)
+                targetMaxLine = line.new(lockedW4Bar, targetMax, bar_index, targetMax, extend=extend.right, color=color.new(color.green, 70), style=line.style_dotted)
+                array.push(targetLines, targetMinLine)
+                array.push(targetLines, targetMaxLine)
+        if not na(lockedW5Bar)
+            w5Line = line.new(lockedW4Bar, lockedW4Price, lockedW5Bar, lockedW5Price, color=impulseLineColor, width=3)
+            w5Style = lockedBullish ? label.style_label_down : label.style_label_up
+            w5Label = label.new(lockedW5Bar, lockedW5Price, text="5", style=w5Style, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW5Subtype + " | 3-4 projection " + str.tostring(lockedW5Ratio * 100.0, "#.##") + "%")
+            array.push(drawnLines, w5Line)
+            array.push(drawnLabels, w5Label)
         f_draw_locked_fib()
         if showDevelopingCandidates and str.length(developingText) > 0 and array.size(swingBars) > 0
             latestIndex = array.size(swingBars) - 1
             latestBar = array.get(swingBars, latestIndex)
-            if latestBar != lockedW1Bar
+            lastLockedBar = not na(lockedW5Bar) ? lockedW5Bar : not na(lockedW4Bar) ? lockedW4Bar : not na(lockedW3Bar) ? lockedW3Bar : not na(lockedW2Bar) ? lockedW2Bar : lockedW1Bar
+            if latestBar != lastLockedBar
                 latestPrice = array.get(swingPrices, latestIndex)
                 latestType = array.get(swingTypes, latestIndex)
                 latestStyle = latestType == 1 ? label.style_label_down : label.style_label_up
-                candidateLabel = label.new(latestBar, latestPrice, text=developingText, style=latestStyle, yloc=yloc.price, color=color.new(color.gray, 35), textcolor=color.white, size=size.tiny, tooltip="Raw pivot only; not promoted to a main Elliott label in Phase 1.")
+                candidateLabel = label.new(latestBar, latestPrice, text=developingText, style=latestStyle, yloc=yloc.price, color=color.new(color.gray, 35), textcolor=color.white, size=size.tiny, tooltip="Developing raw pivot. It is promoted only after its parent-state rules pass.")
                 array.push(drawnLabels, candidateLabel)
     if not na(lastInvalidBar)
         invalidLabel = label.new(lastInvalidBar, lastInvalidPrice, text="INVALID\nrecount " + str.tostring(recountCount), style=label.style_label_down, yloc=yloc.price, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny, tooltip="W2_ORIGIN_BREAK: the locked Point 0 was crossed and released.")
@@ -685,8 +873,8 @@ pivotRsi = rsiValue[pivotRight]
 pivotMacdHist = macdHist[pivotRight]
 degreeImportantHigh = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.highest(high, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 degreeImportantLow = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.lowest(low, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-importantHighSeries = engineMode == "Candidate State (Phase 1)" ? degreeImportantHigh : ta.highest(high, importantLookback)
-importantLowSeries = engineMode == "Candidate State (Phase 1)" ? degreeImportantLow : ta.lowest(low, importantLookback)
+importantHighSeries = f_is_candidate_mode() ? degreeImportantHigh : ta.highest(high, importantLookback)
+importantLowSeries = f_is_candidate_mode() ? degreeImportantLow : ta.lowest(low, importantLookback)
 importantHighAtPivot = importantHighSeries[pivotRight]
 importantLowAtPivot = importantLowSeries[pivotRight]
 importantRangeAtPivot = importantHighAtPivot - importantLowAtPivot
@@ -705,7 +893,7 @@ else if not na(pivotHigh)
 else if not na(pivotLow)
     changed := f_upsert_swing(pivotBar, pivotLow, -1, pivotAtr, pivotMacdHist, pivotRsi, macdLowestAtPivot, lowIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot)
 
-originBroken = engineMode == "Candidate State (Phase 1)" and baseLocked and bar_index > lockedAtBar and (lockedBullish ? low <= lockedBasePrice : high >= lockedBasePrice)
+originBroken = f_is_candidate_mode() and baseLocked and engineStage != "IMPULSE_CONFIRMED" and bar_index > lockedAtBar and (lockedBullish ? low <= lockedBasePrice : high >= lockedBasePrice)
 if originBroken
     baseLocked := false
     candidateState := "INVALID"
@@ -724,27 +912,252 @@ if originBroken
     lockedInternalCount := na
     lockedImportantHigh := na
     lockedImportantLow := na
+    engineStage := "SEARCHING"
+    primaryPattern := ""
+    alternatePattern := ""
+    currentFibAnchor := ""
+    currentFibValue := na
+    currentTimeValue := na
+    currentInternalPattern := ""
+    currentInternalCount := 0
+    currentMacdState := ""
+    currentNextCondition := "Need qualified Point 0 and Wave 1"
+    hpSignalState := ""
+    lockedW2Bar := na
+    lockedW2Price := na
+    lockedW2Pattern := ""
+    lockedW2Subtype := ""
+    lockedW2InternalCount := 0
+    lockedW2Retrace := na
+    lockedW3Bar := na
+    lockedW3Price := na
+    lockedW3Subtype := ""
+    lockedW3InternalCount := 0
+    lockedW3Ratio := na
+    lockedW3Macd := na
+    lockedW4Bar := na
+    lockedW4Price := na
+    lockedW4Pattern := ""
+    lockedW4Retrace := na
+    lockedW5Bar := na
+    lockedW5Price := na
+    lockedW5Subtype := ""
+    lockedW5Ratio := na
     f_redraw_candidate()
 
 if changed
-    if engineMode == "Candidate State (Phase 1)"
+    if f_is_candidate_mode()
         if baseLocked
             latestIndex = array.size(swingBars) - 1
+            latestBar = array.get(swingBars, latestIndex)
+            latestPrice = array.get(swingPrices, latestIndex)
             latestType = array.get(swingTypes, latestIndex)
             baseType = lockedBullish ? -1 : 1
             sameAsBase = latestType == baseType
             latestImportant = array.get(swingImportantExtreme, latestIndex)
             [latestOscillatorOk, latestExtreme, latestDivergence] = f_candidate_oscillator(latestIndex, lockedBullish)
             isAlternate = sameAsBase and latestImportant and latestOscillatorOk
-            if isAlternate
-                alternateBaseCount += 1
-                candidateState := "ALTERNATE"
-                lastReasonCode := "LOCKED_BASE_ALTERNATE"
-                developingText := "Alt 0"
+            if engineMode == "Candidate State (Phase 1)"
+                if isAlternate
+                    alternateBaseCount += 1
+                    candidateState := "ALTERNATE"
+                    lastReasonCode := "LOCKED_BASE_ALTERNATE"
+                    alternatePattern := "Alternate base"
+                    developingText := "Alt 0"
+                else
+                    candidateState := "FORMING"
+                    lastReasonCode := "W2_CLASSIFIER_PENDING"
+                    primaryPattern := "Correction container"
+                    currentNextCondition := "Need a valid W2 correction completion while Point 0 remains intact."
+                    developingText := sameAsBase ? "2?" : "raw"
             else
-                candidateState := "FORMING"
-                lastReasonCode := "W2_CLASSIFIER_PENDING"
-                developingText := sameAsBase ? "2?" : "raw"
+                transitionConfirmed = false
+                alternatePattern := ""
+                hpSignalState := ""
+                if engineStage == "W2_CORRECTION_CONTAINER"
+                    w1Index = f_index_for_bar(lockedW1Bar)
+                    if w1Index >= 0 and latestIndex > w1Index
+                        [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason] = f_eval_simple_correction(w1Index, latestIndex)
+                        retraceDenominator = math.abs(lockedW1Price - lockedBasePrice)
+                        retrace = lockedBullish ? f_ratio(lockedW1Price - latestPrice, retraceDenominator) : f_ratio(latestPrice - lockedW1Price, retraceDenominator)
+                        timeRatio = f_ratio(math.max(1, latestBar - lockedW1Bar), math.max(1, lockedW1Bar - lockedBaseBar))
+                        correctSide = latestType == (lockedBullish ? -1 : 1)
+                        microscopic = not na(retrace) and math.abs(retrace - microscopicRetrace) <= microscopicTolerance
+                        normal = not na(retrace) and retrace >= f_w2_minimum() and retrace <= wave2MaxRetrace
+                        deep = not na(retrace) and retrace >= 0.618 and retrace <= 0.812
+                        currentFibAnchor := "P0-P1 retracement"
+                        currentFibValue := retrace
+                        currentTimeValue := timeRatio
+                        currentInternalPattern := internalPattern
+                        currentInternalCount := internalCount
+                        primaryPattern := correctionPrimary
+                        alternatePattern := correctionAlternate
+                        hpSignalState := deep and correctionConfirmed ? (lockedBullish ? "HP BUY ELIGIBLE" : "HP SELL ELIGIBLE") + (hpSignalMode == "Disabled until project filters" ? " - PROJECT FILTERS TBD" : "") : ""
+                        if correctSide and correctionConfirmed and (normal or microscopic)
+                            lockedW2Bar := latestBar
+                            lockedW2Price := latestPrice
+                            lockedW2Pattern := correctionPrimary
+                            lockedW2Subtype := microscopic ? "W2_MICROSCOPIC" : "W2_NORMAL"
+                            lockedW2InternalCount := internalCount
+                            lockedW2Retrace := retrace
+                            engineStage := "W3_FORMING"
+                            candidateState := "CONFIRMED"
+                            lastReasonCode := "W2_CONFIRMED"
+                            currentNextCondition := "Need a 5/9/13/17/21-move W3 candidate and trending/terminal classification."
+                            developingText := ""
+                            transitionConfirmed := true
+                        else
+                            candidateState := "FORMING"
+                            lastReasonCode := correctionConfirmed ? "W2_RETRACE_OUTSIDE_NORMAL" : correctionReason
+                            currentNextCondition := "Need a complete Zig-Zag/Flat child and an approved W2 price context."
+                            developingText := correctSide ? "2?" : "raw"
+                    else
+                        candidateState := "FORMING"
+                        lastReasonCode := "W2_CLASSIFIER_PENDING"
+                        currentNextCondition := "Need a valid W2 correction completion while Point 0 remains intact."
+                        developingText := "2?"
+                else if engineStage == "W3_FORMING"
+                    w2Index = f_index_for_bar(lockedW2Bar)
+                    if w2Index >= 0 and latestIndex > w2Index
+                        internalCount = latestIndex - w2Index
+                        correctSide = latestType == (lockedBullish ? 1 : -1)
+                        internalValid = f_is_impulse_count(internalCount) and correctSide
+                        extension = f_ratio(math.abs(latestPrice - lockedW2Price), math.abs(lockedW1Price - lockedBasePrice))
+                        terminalOverlap = f_internal_four_overlaps_one(w2Index, latestIndex, lockedBullish)
+                        trending = internalValid and not na(extension) and extension >= wave3MinExtension
+                        terminal = internalValid and not na(extension) and extension >= wave3TerminalMin and extension < wave3MinExtension and terminalOverlap
+                        maxPass = not na(extension) and extension <= f_w3_maximum()
+                        currentFibAnchor := "P0-P1 projected from P2"
+                        currentFibValue := extension
+                        currentInternalPattern := "Impulse candidate " + str.tostring(internalCount) + " moves"
+                        currentInternalCount := internalCount
+                        currentMacdState := array.get(swingMacdExtreme, latestIndex) ? "W3 MOMENTUM SUPPORT" : "W3 MOMENTUM NOT EXTREME"
+                        primaryPattern := "Motive"
+                        if (trending or terminal) and maxPass
+                            lockedW3Bar := latestBar
+                            lockedW3Price := latestPrice
+                            lockedW3Subtype := (trending ? "W3_TRENDING" : "W3_TERMINAL") + (internalCount > 5 ? "_EXTENDED" : "")
+                            lockedW3InternalCount := internalCount
+                            lockedW3Ratio := extension
+                            lockedW3Macd := array.get(swingMacdHist, latestIndex)
+                            currentTimeValue := f_ratio(math.max(1, latestBar - lockedW2Bar), math.max(1, lockedW1Bar - lockedBaseBar))
+                            engineStage := "W4_CORRECTION_CONTAINER"
+                            candidateState := "CONFIRMED"
+                            lastReasonCode := "W3_CONFIRMED"
+                            currentNextCondition := "Need a completed W4 correction; W5 is blocked until then."
+                            developingText := ""
+                            transitionConfirmed := true
+                        else
+                            candidateState := not maxPass and not na(extension) ? "TBD_BLOCKED" : "FORMING"
+                            lastReasonCode := not internalValid ? "W3_INTERNAL_FAIL" : not maxPass ? "W3_SOURCE_MAX_FAIL" : "W3_BELOW_TRENDING_MIN"
+                            currentNextCondition := "Need approved internal count plus trending >=161.8% or a valid terminal structure."
+                            developingText := correctSide ? "3?" : "raw"
+                    else
+                        candidateState := "FORMING"
+                        lastReasonCode := "W3_INTERNAL_FAIL"
+                        currentNextCondition := "Need a 5/9/13/17/21-move W3 candidate."
+                        developingText := "3?"
+                else if engineStage == "W4_CORRECTION_CONTAINER"
+                    w3Index = f_index_for_bar(lockedW3Bar)
+                    if w3Index >= 0 and latestIndex > w3Index
+                        [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason] = f_eval_simple_correction(w3Index, latestIndex)
+                        retrace = f_ratio(math.abs(lockedW3Price - latestPrice), math.abs(lockedW3Price - lockedBasePrice))
+                        correctSide = latestType == (lockedBullish ? -1 : 1)
+                        w3Terminal = str.contains(lockedW3Subtype, "TERMINAL")
+                        maxRetrace = w3Terminal ? wave4TerminalMaxRetrace : wave4MaxRetrace
+                        pricePass = not na(retrace) and retrace >= f_w4_minimum() and retrace <= maxRetrace
+                        overlap = lockedBullish ? latestPrice <= lockedW1Price : latestPrice >= lockedW1Price
+                        overlapInvalid = overlap and not w3Terminal
+                        currentFibAnchor := "Base-P3 retracement"
+                        currentFibValue := retrace
+                        currentInternalPattern := internalPattern
+                        currentInternalCount := internalCount
+                        primaryPattern := correctionPrimary
+                        alternatePattern := correctionAlternate
+                        if correctionConfirmed and correctSide and overlapInvalid
+                            candidateState := "INVALID"
+                            lastReasonCode := "W4_NORMAL_OVERLAP"
+                            alternatePattern := "Terminal/diagonal candidate"
+                            currentNextCondition := "Keep W4 container open or promote a valid terminal/diagonal alternate."
+                            developingText := "4?"
+                        else if correctionConfirmed and correctSide and pricePass
+                            lockedW4Bar := latestBar
+                            lockedW4Price := latestPrice
+                            lockedW4Pattern := correctionPrimary
+                            lockedW4Retrace := retrace
+                            currentTimeValue := f_ratio(math.max(1, latestBar - lockedW3Bar), math.max(1, lockedW2Bar - lockedW1Bar))
+                            engineStage := "W5_FORMING"
+                            candidateState := "CONFIRMED"
+                            lastReasonCode := "W4_CONFIRMED"
+                            currentNextCondition := "W4 is locked; evaluate normal/truncated/extended/ED Wave 5 candidates."
+                            developingText := ""
+                            transitionConfirmed := true
+                        else
+                            candidateState := "FORMING"
+                            lastReasonCode := correctionConfirmed ? "W4_RETRACE_OUTSIDE_NORMAL" : correctionReason
+                            currentNextCondition := "Need a valid correction completion in the approved W4 range; W5 remains blocked."
+                            developingText := correctSide ? "4?" : "raw"
+                    else
+                        candidateState := "FORMING"
+                        lastReasonCode := "W4_CORRECTION_PENDING"
+                        currentNextCondition := "Need a completed W4 correction; W5 remains blocked."
+                        developingText := "4?"
+                else if engineStage == "W5_FORMING"
+                    w4Index = f_index_for_bar(lockedW4Bar)
+                    if w4Index >= 0 and latestIndex > w4Index
+                        internalCount = latestIndex - w4Index
+                        correctSide = latestType == (lockedBullish ? 1 : -1)
+                        internalValid = f_is_impulse_count(internalCount) and correctSide
+                        projection = f_ratio(math.abs(latestPrice - lockedW4Price), math.abs(lockedW3Price - lockedW4Price))
+                        w1Length = math.abs(lockedW1Price - lockedBasePrice)
+                        w3Length = math.abs(lockedW3Price - lockedW2Price)
+                        w5Length = math.abs(latestPrice - lockedW4Price)
+                        w3Shortest = w3Length < w1Length and w3Length < w5Length
+                        latestMacd = array.get(swingMacdHist, latestIndex)
+                        divergence = lockedBullish ? latestPrice > lockedW3Price and latestMacd < lockedW3Macd : latestPrice < lockedW3Price and latestMacd > lockedW3Macd
+                        divergencePass = wave5DivergenceMode != "Required" or divergence
+                        normal = not na(projection) and projection >= wave5MinExtension and projection <= wave5MaxExtension
+                        doubleExtension = lockedInternalCount > 5 and lockedW3InternalCount > 5
+                        truncated = doubleExtension and not na(projection) and projection <= 0.812
+                        currentFibAnchor := "P3-P4 projection"
+                        currentFibValue := projection
+                        currentInternalPattern := "Impulse candidate " + str.tostring(internalCount) + " moves"
+                        currentInternalCount := internalCount
+                        currentMacdState := divergence ? "W3/W5 DIVERGENCE PASS" : "W3/W5 DIVERGENCE ABSENT"
+                        primaryPattern := "Motive"
+                        if internalValid and not w3Shortest and divergencePass and (normal or truncated)
+                            lockedW5Bar := latestBar
+                            lockedW5Price := latestPrice
+                            lockedW5Subtype := truncated ? "W5_TRUNCATED" : "W5_NORMAL"
+                            lockedW5Ratio := projection
+                            currentTimeValue := f_ratio(math.max(1, latestBar - lockedW4Bar), math.max(1, lockedW1Bar - lockedBaseBar))
+                            engineStage := "IMPULSE_CONFIRMED"
+                            candidateState := "CONFIRMED"
+                            lastReasonCode := "W5_CONFIRMED"
+                            currentNextCondition := "Five-wave impulse locked; open the larger correction candidate engine."
+                            developingText := ""
+                            transitionConfirmed := true
+                        else
+                            candidateState := w3Shortest ? "INVALID" : not na(projection) and projection > wave5MaxExtension ? "TBD_BLOCKED" : "FORMING"
+                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? "W5_INTERNAL_FAIL" : "W5_PRICE_SUBTYPE_PENDING"
+                            currentNextCondition := "Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check."
+                            developingText := correctSide ? "5?" : "raw"
+                    else
+                        candidateState := "FORMING"
+                        lastReasonCode := "W5_INTERNAL_FAIL"
+                        currentNextCondition := "Need a valid 5/9/13/17/21-move Wave 5 candidate."
+                        developingText := "5?"
+                else
+                    candidateState := "FORMING"
+                    lastReasonCode := "LARGER_CORRECTION_PENDING"
+                    primaryPattern := "Larger correction"
+                    currentNextCondition := "Maintain Zig-Zag/Flat/Double/Triple/Triangle candidates in parallel."
+                    developingText := "A?"
+                if isAlternate and not transitionConfirmed
+                    alternateBaseCount += 1
+                    alternatePattern := str.length(alternatePattern) > 0 ? alternatePattern + " | Alternate base" : "Alternate base"
+                    if str.length(developingText) == 0
+                        developingText := "Alt 0"
         else
             [candidateStart, candidateEnd, candidateBullish, candidateProgress, candidateCount, candidateNote] = f_find_phase1_candidate()
             if candidateStart >= 0
@@ -759,12 +1172,31 @@ if changed
                 lockedInternalCount := candidateCount
                 lockedImportantHigh := array.get(swingImportantHigh, candidateStart)
                 lockedImportantLow := array.get(swingImportantLow, candidateStart)
+                engineStage := "W2_CORRECTION_CONTAINER"
                 candidateState := "CONFIRMED"
                 lastReasonCode := "W1_CONFIRMED"
+                primaryPattern := "Motive"
+                alternatePattern := ""
+                currentFibAnchor := "Important H/L"
+                currentFibValue := candidateProgress
+                currentTimeValue := na
+                currentInternalPattern := str.tostring(candidateCount) + "-move impulse"
+                currentInternalCount := candidateCount
+                currentMacdState := ""
+                currentNextCondition := "Need a valid W2 correction completion while Point 0 remains intact."
+                hpSignalState := ""
                 developingText := ""
             else if not originBroken
                 candidateState := "SEARCHING"
                 lastReasonCode := "SEARCHING_FOR_BASE"
+                engineStage := "SEARCHING"
+                primaryPattern := ""
+                alternatePattern := ""
+                currentFibAnchor := ""
+                currentFibValue := na
+                currentInternalPattern := ""
+                currentInternalCount := 0
+                currentNextCondition := "Need qualified Point 0 and Wave 1"
                 developingText := ""
         f_redraw_candidate()
     else

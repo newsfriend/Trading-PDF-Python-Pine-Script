@@ -4,11 +4,12 @@ The confirmed pivot/ATR layer is only a raw market-structure provider.  Main
 Elliott labels are emitted by a persistent candidate lifecycle so that a new
 minor pivot cannot advance or restart the main-degree count by itself.
 
-Phase 1 implements the P0 foundation from the developer manual: raw/main pivot
-separation, degree-aware Important High/Low context, Point-0 candidates,
-persistent base locking, W1 degree confirmation, hard origin invalidation and
-controlled recount audit fields.  Later impulse/correction classifiers remain
-explicitly visible as pending rather than being simulated with modulo labels.
+The source-locked candidate engine implements the P0 foundation plus the core
+Wave 1-5 impulse sequence: correction-container gates for Waves 2 and 4,
+trending/terminal Wave 3 classification, normal/truncated Wave 5 paths,
+hard invalidation, and controlled recount audit fields.  Complex corrections,
+full diagonals, and multi-degree routing remain explicitly pending rather than
+being simulated with modulo labels.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ class ElliottWaveConfig:
     important_lookback_days: int = 144
     pivot_left: int = 5
     pivot_right: int = 5
-    max_swings: int = 45
+    max_swings: int = 120
     min_swing_atr_multiple: float = 1.5
     min_swing_range_pct: float = 0.03
     correction_pattern: str = "A-B-C"
@@ -62,16 +63,28 @@ class ElliottWaveConfig:
     oscillator_lookback: int = 100
     important_lookback: int = 144
     degree_retrace: float = 0.618
-    wave2_min_retrace: float = 0.14
+    wave2_minimum_mode: str = "Chartking"
+    wave2_min_retrace: float = 0.236
+    wave2_max_retrace: float = 0.812
+    microscopic_retrace: float = 0.14
+    microscopic_tolerance: float = 0.02
     wave2_max_time: float = 2.0
     wave3_min_extension: float = 1.618
-    wave4_min_retrace: float = 0.14
+    wave3_terminal_min_extension: float = 0.618
+    wave3_maximum_mode: str = "Chartking 2700%"
+    wave3_max_extension: float = 27.0
+    wave4_minimum_mode: str = "Chartking"
+    wave4_min_retrace: float = 0.236
     wave4_max_retrace: float = 0.50
+    wave4_terminal_max_retrace: float = 0.618
     flat_a_max_retrace: float = 0.618
     flat_b_min_retrace: float = 0.618
     flat_b_max_retrace: float = 1.11
     wave5_min_extension: float = 1.27
     wave5_max_extension: float = 2.618
+    wave5_divergence_mode: str = "Support"
+    time_rule_mode: str = "Diagnostic all sources"
+    hp_signal_mode: str = "Disabled until project filters"
     time_tolerance: float = 0.25
     w1_internal_move_counts: tuple[int, ...] = (5, 9, 13, 17, 21)
 
@@ -200,6 +213,30 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
     }
     if cfg.base_oscillator_mode not in valid_oscillator_modes:
         raise ValueError(f"base_oscillator_mode must be one of {sorted(valid_oscillator_modes)}")
+    if cfg.wave2_minimum_mode not in {"Chartking", "Hardik", "Legacy 14%"}:
+        raise ValueError('wave2_minimum_mode must be "Chartking", "Hardik", or "Legacy 14%"')
+    if cfg.wave4_minimum_mode not in {"Chartking", "Hardik", "Extension context"}:
+        raise ValueError(
+            'wave4_minimum_mode must be "Chartking", "Hardik", or "Extension context"'
+        )
+    if cfg.wave3_maximum_mode not in {"Chartking 2700%", "Impulse 2100%"}:
+        raise ValueError(
+            'wave3_maximum_mode must be "Chartking 2700%" or "Impulse 2100%"'
+        )
+    if cfg.wave5_divergence_mode not in {"Support", "Required", "Off"}:
+        raise ValueError('wave5_divergence_mode must be "Support", "Required", or "Off"')
+    if cfg.time_rule_mode not in {
+        "Diagnostic all sources",
+        "Chartking",
+        "Hardik",
+        "Separate Time Analysis",
+    }:
+        raise ValueError("Unsupported time_rule_mode")
+    if cfg.hp_signal_mode not in {
+        "Disabled until project filters",
+        "Structure confirmation only",
+    }:
+        raise ValueError("Unsupported hp_signal_mode")
     if not cfg.w1_internal_move_counts or any(
         count < 5 or count % 4 != 1 for count in cfg.w1_internal_move_counts
     ):
@@ -220,6 +257,12 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         raise ValueError("important_lookback must be at least 10 bars")
     if cfg.degree_retrace <= 0:
         raise ValueError("degree_retrace must be greater than 0")
+    if not 0 < cfg.wave2_min_retrace <= cfg.wave2_max_retrace < 1:
+        raise ValueError("Wave 2 normal retracement must be inside (0, 1)")
+    if not 0 < cfg.wave4_min_retrace <= cfg.wave4_max_retrace < 1:
+        raise ValueError("Wave 4 normal retracement must be inside (0, 1)")
+    if cfg.wave3_terminal_min_extension <= 0 or cfg.wave3_min_extension <= 0:
+        raise ValueError("Wave 3 extension thresholds must be positive")
     if cfg.flat_b_max_retrace < cfg.flat_b_min_retrace:
         raise ValueError("flat_b_max_retrace must be greater than or equal to flat_b_min_retrace")
 
@@ -395,7 +438,7 @@ def _compute_candidate_state(
     cfg: ElliottWaveConfig,
     result: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Apply the Phase-1 candidate lifecycle without inventing later waves."""
+    """Apply the source-locked candidate lifecycle and core impulse engine."""
 
     object_columns = (
         "ew_confirmed_at",
@@ -414,6 +457,15 @@ def _compute_candidate_state(
         "ew_degree",
         "ew_degree_timeframe",
         "ew_recount_reason",
+        "ew_parent_state",
+        "ew_primary_pattern",
+        "ew_alternate_pattern",
+        "ew_source_rule_id",
+        "ew_fib_anchor",
+        "ew_time_rule_mode",
+        "ew_macd_state",
+        "ew_internal_pattern",
+        "ew_hp_signal",
     )
     for column in object_columns:
         result[column] = pd.Series(index=result.index, dtype="object")
@@ -436,6 +488,9 @@ def _compute_candidate_state(
     result["ew_internal_count"] = np.nan
     result["ew_recount_count"] = 0
     result["ew_alternate_bases"] = 0
+    result["ew_fib_value"] = np.nan
+    result["ew_time_value"] = np.nan
+    result["ew_confidence"] = np.nan
 
     lifecycle = _run_candidate_state(swings, cfg, source)
     for event in lifecycle["events"]:
@@ -448,23 +503,17 @@ def _compute_candidate_state(
     active = lifecycle["active"]
     if active is not None:
         base = swings[active["start_idx"]]
-        wave1 = swings[active["end_idx"]]
         direction = "bullish" if active["bullish"] else "bearish"
         degree_name, degree_timeframe = _degree_metadata(cfg)
         common = {
             "ew_pivot": True,
-            "ew_confirmed_at": wave1.confirmed_index,
             "ew_cycle": lifecycle["recount_count"],
-            "ew_correction_pattern": "TBD - correction classifier not active in Phase 1",
             "ew_rule_state": "ok",
             "ew_start_confirmed": True,
             "ew_anchor_direction": direction,
             "ew_anchor_important_high": base.important_high,
             "ew_anchor_important_low": base.important_low,
             "ew_engine_state": "CONFIRMED",
-            "ew_pattern": "Motive candidate",
-            "ew_subtype": "TBD",
-            "ew_reason_code": "W1_CONFIRMED",
             "ew_degree": degree_name,
             "ew_degree_timeframe": degree_timeframe,
             "ew_base_locked": True,
@@ -474,34 +523,57 @@ def _compute_candidate_state(
             "ew_internal_count": active["internal_count"],
             "ew_recount_count": lifecycle["recount_count"],
             "ew_alternate_bases": lifecycle["alternate_count"],
+            "ew_parent_state": active["parent_state"],
+            "ew_time_rule_mode": cfg.time_rule_mode,
         }
         for fib_ratio, fib_name in _FIB_LEVELS:
             common[f"ew_anchor_fib_{fib_name}"] = _anchor_fib_price(base, fib_ratio)
 
-        for phase, swing, label in ((0, base, "0"), (1, wave1, "1")):
+        for label, wave in active["waves"].items():
+            phase = int(label)
+            swing = swings[int(wave["swing_idx"])]
             for column, value in common.items():
                 result.loc[swing.index, column] = value
+            result.loc[swing.index, "ew_confirmed_at"] = swing.confirmed_index
             result.loc[swing.index, "ew_phase"] = phase
             result.loc[swing.index, "ew_label"] = label
             result.loc[swing.index, "ew_candidate_label"] = label
-            result.loc[swing.index, "ew_rule_note"] = active["note"]
-            result.loc[swing.index, "ew_next_condition"] = (
-                "Protect Point 0 and wait for the Wave 2 correction classifiers."
+            result.loc[swing.index, "ew_pattern"] = wave["pattern"]
+            result.loc[swing.index, "ew_subtype"] = wave["subtype"]
+            result.loc[swing.index, "ew_reason_code"] = wave["reason_code"]
+            result.loc[swing.index, "ew_source_rule_id"] = wave["source_rule_id"]
+            result.loc[swing.index, "ew_rule_note"] = wave["note"]
+            result.loc[swing.index, "ew_next_condition"] = active["next_condition"]
+            result.loc[swing.index, "ew_correction_pattern"] = wave.get("pattern", "")
+            result.loc[swing.index, "ew_primary_pattern"] = wave.get("pattern", "")
+            result.loc[swing.index, "ew_alternate_pattern"] = wave.get("alternate", "")
+            result.loc[swing.index, "ew_fib_anchor"] = wave.get("fib_anchor", "")
+            result.loc[swing.index, "ew_fib_value"] = wave.get("fib_value", np.nan)
+            result.loc[swing.index, "ew_time_value"] = wave.get("time_value", np.nan)
+            result.loc[swing.index, "ew_macd_state"] = wave.get("macd_state", "")
+            result.loc[swing.index, "ew_internal_pattern"] = wave.get(
+                "internal_pattern", ""
             )
+            result.loc[swing.index, "ew_internal_count"] = wave.get(
+                "internal_count", np.nan
+            )
+            result.loc[swing.index, "ew_hp_signal"] = wave.get("hp_signal", "")
+            result.loc[swing.index, "ew_confidence"] = wave.get("confidence", np.nan)
 
     result.attrs["elliott_wave_state"] = {
         "engine": "Candidate State",
-        "phase": "Phase 1 / P0 foundation",
-        "state": "CONFIRMED" if active is not None else lifecycle["final_state"],
+        "phase": "Phase 2 / core impulse",
+        "state": active["parent_state"] if active is not None else lifecycle["final_state"],
         "base_locked": active is not None,
+        "confirmed_labels": list(active["waves"].keys()) if active is not None else [],
         "recount_count": lifecycle["recount_count"],
         "alternate_base_count": lifecycle["alternate_count"],
         "last_reason_code": lifecycle["last_reason_code"],
         "pending_modules": [
-            "Wave 2-5 classifiers",
-            "automatic correction family detection",
-            "diagonal classifier",
+            "complex correction families beyond simple ABC",
+            "full diagonal classifier",
             "full multi-degree routing",
+            "owner-blocked conflict decisions",
         ],
     }
     return result
@@ -522,11 +594,7 @@ def _run_candidate_state(
     cfg: ElliottWaveConfig,
     source: pd.DataFrame | None = None,
 ) -> dict[str, object]:
-    """Return deterministic state transitions for the Phase-1 engine.
-
-    The function is intentionally independent from chart drawing so the hard
-    lifecycle rules can be regression-tested with synthetic confirmed pivots.
-    """
+    """Return deterministic state transitions for the core impulse engine."""
 
     events: list[dict[str, object]] = []
     active: dict[str, object] | None = None
@@ -542,7 +610,7 @@ def _run_candidate_state(
 
     for swing_index in ordered_indices:
         swing = swings[swing_index]
-        if active is not None:
+        if active is not None and active["parent_state"] != "IMPULSE_CONFIRMED":
             break_position = _origin_break_position(
                 source,
                 active,
@@ -583,7 +651,39 @@ def _run_candidate_state(
             )
             if candidate is not None:
                 active = candidate
-                active["last_checked_position"] = swing.confirmed_position
+                active.update(
+                    {
+                        "last_checked_position": swing.confirmed_position,
+                        "parent_state": "W2_CORRECTION_CONTAINER",
+                        "next_condition": "Need a valid W2 correction completion while Point 0 remains intact.",
+                        "waves": {
+                            "0": _make_wave_record(
+                                swing_idx=int(candidate["start_idx"]),
+                                pattern="Base",
+                                subtype="LOCKED_BASE",
+                                reason_code="BASE_LOCKED",
+                                source_rule_id="V3-P2-BASE",
+                                note="Qualified Important H/L base locked after Wave 1 degree confirmation.",
+                            ),
+                            "1": _make_wave_record(
+                                swing_idx=int(candidate["end_idx"]),
+                                pattern="Motive",
+                                subtype=(
+                                    "EXTENDED_W1"
+                                    if int(candidate["internal_count"]) > 5
+                                    else "NORMAL_W1"
+                                ),
+                                reason_code="W1_CONFIRMED",
+                                source_rule_id="V3-P24-W1",
+                                note=str(candidate["note"]),
+                                fib_anchor="Important H/L",
+                                fib_value=float(candidate["degree_progress"]),
+                                internal_pattern="5/9/13/17/21-move impulse",
+                                internal_count=int(candidate["internal_count"]),
+                            ),
+                        },
+                    }
+                )
                 last_reason_code = "W1_CONFIRMED"
                 events.append(
                     {
@@ -591,12 +691,14 @@ def _run_candidate_state(
                         "values": {
                             "ew_engine_state": "CONFIRMED",
                             "ew_candidate_label": "1",
-                            "ew_pattern": "Motive candidate",
-                            "ew_subtype": "TBD",
+                            "ew_pattern": "Motive",
+                            "ew_subtype": active["waves"]["1"]["subtype"],
                             "ew_reason_code": last_reason_code,
                             "ew_rule_state": "ok",
                             "ew_rule_note": candidate["note"],
-                            "ew_next_condition": "Protect Point 0; classify Wave 2 when its module is enabled.",
+                            "ew_next_condition": active["next_condition"],
+                            "ew_parent_state": active["parent_state"],
+                            "ew_source_rule_id": "V3-P24-W1",
                             "ew_base_locked": True,
                             "ew_base_price": candidate["base_price"],
                             "ew_base_position": candidate["base_position"],
@@ -628,29 +730,43 @@ def _run_candidate_state(
                     and swing.important_extreme
                     and _oscillator_evidence(swings, swing_index, active["bullish"], cfg)[0]
                 )
-                if alternate:
+                transition = _advance_impulse_state(active, swings, swing_index, cfg)
+                if alternate and transition["status"] != "CONFIRMED":
                     alternate_count += 1
-                    state = "ALTERNATE"
-                    candidate_label = "Alt 0"
-                    reason = "LOCKED_BASE_ALTERNATE"
-                    note = "A new important same-side pivot is stored as an alternate; the locked base is unchanged."
-                else:
-                    state = "FORMING"
-                    candidate_label = "2?" if same_as_base else ""
-                    reason = "W2_CLASSIFIER_PENDING"
-                    note = "The raw pivot is retained, but Phase 1 does not promote it to a main Elliott label."
+                    transition["alternate_pattern"] = "Alternate base"
+                    if not transition["candidate_label"]:
+                        transition["candidate_label"] = "Alt 0"
+                last_reason_code = str(transition["reason_code"])
                 events.append(
                     {
                         "index": swing.index,
                         "values": {
-                            "ew_engine_state": state,
-                            "ew_candidate_label": candidate_label,
-                            "ew_pattern": "TBD",
-                            "ew_subtype": "TBD",
-                            "ew_reason_code": reason,
-                            "ew_rule_state": "pending",
-                            "ew_rule_note": note,
-                            "ew_next_condition": "Run the Wave 2 and correction-family classifiers in Phase 2.",
+                            "ew_engine_state": transition["status"],
+                            "ew_candidate_label": transition["candidate_label"],
+                            "ew_pattern": transition["pattern"],
+                            "ew_subtype": transition["subtype"],
+                            "ew_reason_code": transition["reason_code"],
+                            "ew_rule_state": (
+                                "ok"
+                                if transition["status"] == "CONFIRMED"
+                                else "invalid"
+                                if transition["status"] == "INVALID"
+                                else "pending"
+                            ),
+                            "ew_rule_note": transition["note"],
+                            "ew_next_condition": transition["next_condition"],
+                            "ew_parent_state": active["parent_state"],
+                            "ew_primary_pattern": transition["pattern"],
+                            "ew_alternate_pattern": transition["alternate_pattern"],
+                            "ew_source_rule_id": transition["source_rule_id"],
+                            "ew_fib_anchor": transition["fib_anchor"],
+                            "ew_fib_value": transition["fib_value"],
+                            "ew_time_rule_mode": cfg.time_rule_mode,
+                            "ew_time_value": transition["time_value"],
+                            "ew_macd_state": transition["macd_state"],
+                            "ew_internal_pattern": transition["internal_pattern"],
+                            "ew_internal_count": transition["internal_count"],
+                            "ew_hp_signal": transition["hp_signal"],
                             "ew_base_locked": True,
                             "ew_base_price": base.price,
                             "ew_base_position": base.position,
@@ -660,7 +776,11 @@ def _run_candidate_state(
                     }
                 )
 
-    if active is not None and source is not None:
+    if (
+        active is not None
+        and source is not None
+        and active["parent_state"] != "IMPULSE_CONFIRMED"
+    ):
         tail_break = _origin_break_position(
             source,
             active,
@@ -693,9 +813,574 @@ def _run_candidate_state(
         "events": events,
         "recount_count": recount_count,
         "alternate_count": alternate_count,
-        "final_state": "SEARCHING" if active is None else "CONFIRMED",
+        "final_state": "SEARCHING" if active is None else str(active["parent_state"]),
         "last_reason_code": last_reason_code,
     }
+
+
+def _make_wave_record(
+    *,
+    swing_idx: int,
+    pattern: str,
+    subtype: str,
+    reason_code: str,
+    source_rule_id: str,
+    note: str,
+    fib_anchor: str = "",
+    fib_value: float = np.nan,
+    time_value: float = np.nan,
+    macd_state: str = "",
+    internal_pattern: str = "",
+    internal_count: int | float = np.nan,
+    alternate: str = "",
+    hp_signal: str = "",
+    confidence: float = np.nan,
+) -> dict[str, object]:
+    return {
+        "swing_idx": swing_idx,
+        "pattern": pattern,
+        "subtype": subtype,
+        "reason_code": reason_code,
+        "source_rule_id": source_rule_id,
+        "note": note,
+        "fib_anchor": fib_anchor,
+        "fib_value": fib_value,
+        "time_value": time_value,
+        "macd_state": macd_state,
+        "internal_pattern": internal_pattern,
+        "internal_count": internal_count,
+        "alternate": alternate,
+        "hp_signal": hp_signal,
+        "confidence": confidence,
+    }
+
+
+def _transition(
+    *,
+    status: str = "FORMING",
+    candidate_label: str = "",
+    pattern: str = "",
+    subtype: str = "",
+    reason_code: str,
+    note: str,
+    next_condition: str,
+    source_rule_id: str,
+    alternate_pattern: str = "",
+    fib_anchor: str = "",
+    fib_value: float = np.nan,
+    time_value: float = np.nan,
+    macd_state: str = "",
+    internal_pattern: str = "",
+    internal_count: int | float = np.nan,
+    hp_signal: str = "",
+) -> dict[str, object]:
+    return locals()
+
+
+def _advance_impulse_state(
+    active: dict[str, object],
+    swings: list[_Swing],
+    end_idx: int,
+    cfg: ElliottWaveConfig,
+) -> dict[str, object]:
+    state = str(active["parent_state"])
+    bullish = bool(active["bullish"])
+    waves = active["waves"]
+
+    if state == "W2_CORRECTION_CONTAINER":
+        start_idx = int(waves["1"]["swing_idx"])
+        correction = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
+        p0 = swings[int(waves["0"]["swing_idx"])]
+        p1 = swings[start_idx]
+        p2 = swings[end_idx]
+        correct_side = p2.kind == (-1 if bullish else 1)
+        retrace = _directional_retrace(p0.price, p1.price, p2.price, bullish)
+        time_ratio = _duration_ratio(p1, p2, p0, p1)
+        microscopic = bool(
+            np.isfinite(retrace)
+            and abs(retrace - cfg.microscopic_retrace) <= cfg.microscopic_tolerance
+        )
+        normal = bool(
+            np.isfinite(retrace)
+            and _w2_minimum(cfg) <= retrace <= cfg.wave2_max_retrace
+        )
+        deep = bool(np.isfinite(retrace) and 0.618 <= retrace <= 0.812)
+        subtype = "W2_MICROSCOPIC" if microscopic else "W2_NORMAL" if normal else "W2_OUTSIDE_NORMAL"
+        hp_signal = (
+            "HP BUY ELIGIBLE" if bullish else "HP SELL ELIGIBLE"
+        ) if deep and correction["confirmed"] else ""
+        if hp_signal and cfg.hp_signal_mode == "Disabled until project filters":
+            hp_signal += " - PROJECT FILTERS TBD"
+
+        if correct_side and correction["confirmed"] and (normal or microscopic):
+            record = _make_wave_record(
+                swing_idx=end_idx,
+                pattern=str(correction["primary"]),
+                subtype=subtype,
+                reason_code="W2_CONFIRMED",
+                source_rule_id="V3-P24-25-W2",
+                note=(
+                    f"Wave 2 {correction['primary']} completed; retracement={retrace:.2%}; "
+                    f"B={correction['b_ratio']:.2%}."
+                ),
+                fib_anchor="P0-P1 retracement",
+                fib_value=retrace,
+                time_value=time_ratio,
+                internal_pattern=str(correction["internal_pattern"]),
+                internal_count=int(correction["internal_count"]),
+                alternate=str(correction["alternate"]),
+                hp_signal=hp_signal,
+            )
+            waves["2"] = record
+            active["parent_state"] = "W3_FORMING"
+            active["next_condition"] = "Need a 5/9/13/17/21-move W3 candidate and trending/terminal classification."
+            return _transition(
+                status="CONFIRMED",
+                candidate_label="2",
+                pattern=str(correction["primary"]),
+                subtype=subtype,
+                reason_code="W2_CONFIRMED",
+                note=str(record["note"]),
+                next_condition=active["next_condition"],
+                source_rule_id="V3-P24-25-W2",
+                alternate_pattern=str(correction["alternate"]),
+                fib_anchor="P0-P1 retracement",
+                fib_value=retrace,
+                time_value=time_ratio,
+                internal_pattern=str(correction["internal_pattern"]),
+                internal_count=int(correction["internal_count"]),
+                hp_signal=hp_signal,
+            )
+
+        reason = (
+            str(correction["reason_code"])
+            if not correction["confirmed"]
+            else "W2_RETRACE_OUTSIDE_NORMAL"
+        )
+        return _transition(
+            candidate_label="2?" if correct_side else "",
+            pattern=str(correction["primary"]),
+            subtype=subtype,
+            reason_code=reason,
+            note=(
+                f"Wave 2 correction container: retracement={retrace:.2%}; "
+                f"{correction['note']}"
+            ),
+            next_condition="Need a complete Zig-Zag/Flat child and an approved W2 price context.",
+            source_rule_id="V3-P24-25-W2",
+            alternate_pattern=str(correction["alternate"]),
+            fib_anchor="P0-P1 retracement",
+            fib_value=retrace,
+            time_value=time_ratio,
+            internal_pattern=str(correction["internal_pattern"]),
+            internal_count=int(correction["internal_count"]),
+            hp_signal=hp_signal,
+        )
+
+    if state == "W3_FORMING":
+        p0 = swings[int(waves["0"]["swing_idx"])]
+        p1 = swings[int(waves["1"]["swing_idx"])]
+        p2 = swings[int(waves["2"]["swing_idx"])]
+        p3 = swings[end_idx]
+        internal_count = end_idx - int(waves["2"]["swing_idx"])
+        correct_side = p3.kind == (1 if bullish else -1)
+        internal_valid = internal_count in cfg.w1_internal_move_counts and correct_side
+        ratio = _safe_ratio(abs(p3.price - p2.price), abs(p1.price - p0.price))
+        terminal_overlap = _internal_four_overlaps_one(
+            swings, int(waves["2"]["swing_idx"]), end_idx, bullish
+        )
+        trending = internal_valid and ratio >= cfg.wave3_min_extension
+        terminal = bool(
+            internal_valid
+            and cfg.wave3_terminal_min_extension <= ratio < cfg.wave3_min_extension
+            and terminal_overlap
+        )
+        max_pass = np.isfinite(ratio) and ratio <= _w3_maximum(cfg)
+        macd_state = "W3 MOMENTUM SUPPORT" if p3.macd_extreme else "W3 MOMENTUM NOT EXTREME"
+        if (trending or terminal) and max_pass:
+            subtype = "W3_TRENDING" if trending else "W3_TERMINAL"
+            if internal_count > 5:
+                subtype += "_EXTENDED"
+            time_ratio = _duration_ratio(p2, p3, p0, p1)
+            record = _make_wave_record(
+                swing_idx=end_idx,
+                pattern="Motive",
+                subtype=subtype,
+                reason_code="W3_CONFIRMED",
+                source_rule_id="V3-P25-26-W3",
+                note=f"{subtype} confirmed at {ratio:.2%} of Wave 1.",
+                fib_anchor="P0-P1 projected from P2",
+                fib_value=ratio,
+                time_value=time_ratio,
+                macd_state=macd_state,
+                internal_pattern="5/9/13/17/21-move impulse",
+                internal_count=internal_count,
+            )
+            waves["3"] = record
+            active["parent_state"] = "W4_CORRECTION_CONTAINER"
+            active["next_condition"] = "Need a completed W4 correction; W5 is blocked until then."
+            return _transition(
+                status="CONFIRMED",
+                candidate_label="3",
+                pattern="Motive",
+                subtype=subtype,
+                reason_code="W3_CONFIRMED",
+                note=str(record["note"]),
+                next_condition=active["next_condition"],
+                source_rule_id="V3-P25-26-W3",
+                fib_anchor="P0-P1 projected from P2",
+                fib_value=ratio,
+                time_value=time_ratio,
+                macd_state=macd_state,
+                internal_pattern="5/9/13/17/21-move impulse",
+                internal_count=internal_count,
+            )
+        reason = (
+            "W3_INTERNAL_FAIL"
+            if not internal_valid
+            else "W3_SOURCE_MAX_FAIL"
+            if not max_pass
+            else "W3_BELOW_TRENDING_MIN"
+        )
+        return _transition(
+            candidate_label="3?" if correct_side else "",
+            pattern="Motive",
+            subtype="TERMINAL_CANDIDATE" if terminal_overlap else "TRENDING_CANDIDATE",
+            reason_code=reason,
+            note=f"Wave 3 forming: extension={ratio:.2%}, internal moves={internal_count}.",
+            next_condition="Need approved internal count plus trending >=161.8% or a valid terminal structure.",
+            source_rule_id="V3-P25-26-W3",
+            fib_anchor="P0-P1 projected from P2",
+            fib_value=ratio,
+            macd_state=macd_state,
+            internal_pattern="Impulse candidate",
+            internal_count=internal_count,
+        )
+
+    if state == "W4_CORRECTION_CONTAINER":
+        p0 = swings[int(waves["0"]["swing_idx"])]
+        p1 = swings[int(waves["1"]["swing_idx"])]
+        p3 = swings[int(waves["3"]["swing_idx"])]
+        p4 = swings[end_idx]
+        correction = _evaluate_simple_correction(
+            swings, int(waves["3"]["swing_idx"]), end_idx, cfg
+        )
+        correct_side = p4.kind == (-1 if bullish else 1)
+        retrace = _safe_ratio(abs(p3.price - p4.price), abs(p3.price - p0.price))
+        w3_terminal = "TERMINAL" in str(waves["3"]["subtype"])
+        max_retrace = cfg.wave4_terminal_max_retrace if w3_terminal else cfg.wave4_max_retrace
+        price_pass = _w4_minimum(cfg) <= retrace <= max_retrace
+        overlap = p4.price <= p1.price if bullish else p4.price >= p1.price
+        overlap_invalid = overlap and not w3_terminal
+        if correction["confirmed"] and correct_side and overlap_invalid:
+            return _transition(
+                status="INVALID",
+                candidate_label="4?",
+                pattern=str(correction["primary"]),
+                subtype="NORMAL_W4_REJECTED",
+                reason_code="W4_NORMAL_OVERLAP",
+                note="Normal impulse Wave 4 entered Wave 1 territory; diagonal/terminal alternate required.",
+                next_condition="Keep W4 container open or promote a valid terminal/diagonal alternate.",
+                source_rule_id="V3-P26-W4-OVERLAP",
+                alternate_pattern="Terminal/diagonal candidate",
+                fib_anchor="Base-P3 retracement",
+                fib_value=retrace,
+                internal_pattern=str(correction["internal_pattern"]),
+                internal_count=int(correction["internal_count"]),
+            )
+        if correction["confirmed"] and correct_side and price_pass:
+            w2 = swings[int(waves["2"]["swing_idx"])]
+            similarity = abs(float(waves["2"]["fib_value"]) - retrace)
+            time_ratio = _duration_ratio(p3, p4, p1, w2)
+            record = _make_wave_record(
+                swing_idx=end_idx,
+                pattern=str(correction["primary"]),
+                subtype="W4_NORMAL" if not w3_terminal else "W4_TERMINAL_CONTEXT",
+                reason_code="W4_CONFIRMED",
+                source_rule_id="V3-P26-W4",
+                note=(
+                    f"Wave 4 {correction['primary']} completed; Base-P3 retracement={retrace:.2%}; "
+                    f"W2/W4 similarity difference={similarity:.2%}."
+                ),
+                fib_anchor="Base-P3 retracement",
+                fib_value=retrace,
+                time_value=time_ratio,
+                internal_pattern=str(correction["internal_pattern"]),
+                internal_count=int(correction["internal_count"]),
+                alternate=str(correction["alternate"]),
+            )
+            waves["4"] = record
+            active["parent_state"] = "W5_FORMING"
+            active["next_condition"] = "W4 is locked; evaluate normal/truncated/extended/ED Wave 5 candidates."
+            return _transition(
+                status="CONFIRMED",
+                candidate_label="4",
+                pattern=str(correction["primary"]),
+                subtype=str(record["subtype"]),
+                reason_code="W4_CONFIRMED",
+                note=str(record["note"]),
+                next_condition=active["next_condition"],
+                source_rule_id="V3-P26-W4",
+                alternate_pattern=str(correction["alternate"]),
+                fib_anchor="Base-P3 retracement",
+                fib_value=retrace,
+                time_value=time_ratio,
+                internal_pattern=str(correction["internal_pattern"]),
+                internal_count=int(correction["internal_count"]),
+            )
+        return _transition(
+            candidate_label="4?" if correct_side else "",
+            pattern=str(correction["primary"]),
+            subtype="W4_CORRECTION_CONTAINER",
+            reason_code=(
+                "W4_RETRACE_OUTSIDE_NORMAL" if correction["confirmed"] else str(correction["reason_code"])
+            ),
+            note=f"Wave 4 container remains open; retracement={retrace:.2%}; {correction['note']}",
+            next_condition="Need a valid correction completion in the approved W4 range; W5 remains blocked.",
+            source_rule_id="V3-P26-W4",
+            alternate_pattern=str(correction["alternate"]),
+            fib_anchor="Base-P3 retracement",
+            fib_value=retrace,
+            internal_pattern=str(correction["internal_pattern"]),
+            internal_count=int(correction["internal_count"]),
+        )
+
+    if state == "W5_FORMING":
+        p0 = swings[int(waves["0"]["swing_idx"])]
+        p1 = swings[int(waves["1"]["swing_idx"])]
+        p2 = swings[int(waves["2"]["swing_idx"])]
+        p3 = swings[int(waves["3"]["swing_idx"])]
+        p4 = swings[int(waves["4"]["swing_idx"])]
+        p5 = swings[end_idx]
+        internal_count = end_idx - int(waves["4"]["swing_idx"])
+        correct_side = p5.kind == (1 if bullish else -1)
+        internal_valid = internal_count in cfg.w1_internal_move_counts and correct_side
+        ratio = _safe_ratio(abs(p5.price - p4.price), abs(p3.price - p4.price))
+        w1_length = abs(p1.price - p0.price)
+        w3_length = abs(p3.price - p2.price)
+        w5_length = abs(p5.price - p4.price)
+        w3_shortest = w3_length < w1_length and w3_length < w5_length
+        divergence = (
+            p5.price > p3.price and p5.macd_hist < p3.macd_hist
+            if bullish
+            else p5.price < p3.price and p5.macd_hist > p3.macd_hist
+        )
+        divergence_pass = cfg.wave5_divergence_mode != "Required" or divergence
+        normal = cfg.wave5_min_extension <= ratio <= cfg.wave5_max_extension
+        double_extension = (
+            float(waves["1"]["internal_count"]) > 5
+            and float(waves["3"]["internal_count"]) > 5
+        )
+        truncated = double_extension and ratio <= 0.812
+        if internal_valid and not w3_shortest and divergence_pass and (normal or truncated):
+            subtype = "W5_TRUNCATED" if truncated else "W5_NORMAL"
+            macd_state = "W3/W5 DIVERGENCE PASS" if divergence else "W3/W5 DIVERGENCE ABSENT"
+            time_ratio = _duration_ratio(p4, p5, p0, p1)
+            record = _make_wave_record(
+                swing_idx=end_idx,
+                pattern="Motive",
+                subtype=subtype,
+                reason_code="W5_CONFIRMED",
+                source_rule_id="V3-P26-27-W5",
+                note=f"{subtype} confirmed; 3-4 projection={ratio:.2%}; W3 shortest=false.",
+                fib_anchor="P3-P4 projection",
+                fib_value=ratio,
+                time_value=time_ratio,
+                macd_state=macd_state,
+                internal_pattern="5/9/13/17/21-move impulse",
+                internal_count=internal_count,
+            )
+            waves["5"] = record
+            active["parent_state"] = "IMPULSE_CONFIRMED"
+            active["next_condition"] = "Five-wave impulse locked; open the larger correction candidate engine."
+            return _transition(
+                status="CONFIRMED",
+                candidate_label="5",
+                pattern="Motive",
+                subtype=subtype,
+                reason_code="W5_CONFIRMED",
+                note=str(record["note"]),
+                next_condition=active["next_condition"],
+                source_rule_id="V3-P26-27-W5",
+                fib_anchor="P3-P4 projection",
+                fib_value=ratio,
+                time_value=time_ratio,
+                macd_state=macd_state,
+                internal_pattern="5/9/13/17/21-move impulse",
+                internal_count=internal_count,
+            )
+        reason = "W5_W3_SHORTEST" if w3_shortest else "W5_INTERNAL_FAIL" if not internal_valid else "W5_PRICE_SUBTYPE_PENDING"
+        return _transition(
+            status="INVALID" if w3_shortest else "TBD_BLOCKED" if ratio > cfg.wave5_max_extension else "FORMING",
+            candidate_label="5?" if correct_side else "",
+            pattern="Motive",
+            subtype="W5_EXTENSION_TBD" if ratio > cfg.wave5_max_extension else "W5_CANDIDATE",
+            reason_code=reason,
+            note=f"Wave 5 forming: 3-4 projection={ratio:.2%}, internal moves={internal_count}.",
+            next_condition="Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check.",
+            source_rule_id="V3-P26-27-W5",
+            fib_anchor="P3-P4 projection",
+            fib_value=ratio,
+            macd_state="W3/W5 DIVERGENCE PASS" if divergence else "W3/W5 DIVERGENCE ABSENT",
+            internal_pattern="Impulse candidate",
+            internal_count=internal_count,
+        )
+
+    return _transition(
+        candidate_label="A?",
+        pattern="Larger correction",
+        subtype="CORRECTION_CONTAINER",
+        reason_code="LARGER_CORRECTION_PENDING",
+        note="The five-wave impulse is locked; larger automatic correction classification is the next module.",
+        next_condition="Maintain Zig-Zag/Flat/Double/Triple/Triangle candidates in parallel.",
+        source_rule_id="V3-P27-29-CORRECTIONS",
+    )
+
+
+def _evaluate_simple_correction(
+    swings: list[_Swing], start_idx: int, end_idx: int, cfg: ElliottWaveConfig
+) -> dict[str, object]:
+    """Evaluate source-locked Zig-Zag and Flat candidates in parallel."""
+
+    candidates: list[dict[str, object]] = []
+    impulse_counts = cfg.w1_internal_move_counts
+    correction_counts = (3, 7, 11)
+
+    for a_count in impulse_counts:
+        for b_count in correction_counts:
+            for c_count in impulse_counts:
+                if start_idx + a_count + b_count + c_count != end_idx:
+                    continue
+                candidate = _correction_ratios(
+                    swings, start_idx, a_count, b_count, c_count
+                )
+                if (
+                    0.01 <= candidate["b_ratio"] <= 0.50
+                    and candidate["c_vs_b"] >= 1.27
+                ):
+                    candidates.append(
+                        {
+                            **candidate,
+                            "pattern": "Zig-Zag",
+                            "internal_pattern": f"{a_count}-{b_count}-{c_count}",
+                        }
+                    )
+
+    for a_count in correction_counts:
+        for b_count in correction_counts:
+            for c_count in impulse_counts:
+                if start_idx + a_count + b_count + c_count != end_idx:
+                    continue
+                candidate = _correction_ratios(
+                    swings, start_idx, a_count, b_count, c_count
+                )
+                if (
+                    cfg.flat_b_min_retrace <= candidate["b_ratio"] <= cfg.flat_b_max_retrace
+                    and 0.618 <= candidate["c_vs_a"] <= 2.618
+                ):
+                    candidates.append(
+                        {
+                            **candidate,
+                            "pattern": "Flat",
+                            "internal_pattern": f"{a_count}-{b_count}-{c_count}",
+                        }
+                    )
+
+    if candidates:
+        primary = candidates[0]
+        alternate = candidates[1]["pattern"] if len(candidates) > 1 else ""
+        return {
+            "confirmed": True,
+            "primary": primary["pattern"],
+            "alternate": alternate,
+            "b_ratio": primary["b_ratio"],
+            "internal_pattern": primary["internal_pattern"],
+            "internal_count": end_idx - start_idx,
+            "reason_code": "CORRECTION_CONFIRMED",
+            "note": (
+                f"{primary['pattern']} {primary['internal_pattern']} passes; "
+                f"B={primary['b_ratio']:.2%}, C/A={primary['c_vs_a']:.2%}."
+            ),
+        }
+
+    b_ratio = np.nan
+    if end_idx - start_idx >= 6:
+        a = swings[start_idx + 3]
+        b = swings[start_idx + 6]
+        b_ratio = _safe_ratio(abs(b.price - a.price), abs(a.price - swings[start_idx].price))
+    reason = "FLAT_B_GT_111" if np.isfinite(b_ratio) and b_ratio > cfg.flat_b_max_retrace else "C_INTERNAL_INCOMPLETE"
+    return {
+        "confirmed": False,
+        "primary": "Zig-Zag / Flat",
+        "alternate": "",
+        "b_ratio": b_ratio,
+        "internal_pattern": "parallel candidates",
+        "internal_count": max(0, end_idx - start_idx),
+        "reason_code": reason,
+        "note": "Parallel Zig-Zag and Flat candidates remain forming; required internal counts/Fib gates are incomplete.",
+    }
+
+
+def _correction_ratios(
+    swings: list[_Swing],
+    start_idx: int,
+    a_count: int,
+    b_count: int,
+    c_count: int,
+) -> dict[str, float]:
+    start = swings[start_idx]
+    a = swings[start_idx + a_count]
+    b = swings[start_idx + a_count + b_count]
+    c = swings[start_idx + a_count + b_count + c_count]
+    a_length = abs(a.price - start.price)
+    b_length = abs(b.price - a.price)
+    c_length = abs(c.price - b.price)
+    return {
+        "b_ratio": _safe_ratio(b_length, a_length),
+        "c_vs_a": _safe_ratio(c_length, a_length),
+        "c_vs_b": _safe_ratio(c_length, b_length),
+    }
+
+
+def _directional_retrace(p0: float, p1: float, current: float, bullish: bool) -> float:
+    wave1 = abs(p1 - p0)
+    return _safe_ratio(p1 - current if bullish else current - p1, wave1)
+
+
+def _duration_ratio(
+    start: _Swing, end: _Swing, reference_start: _Swing, reference_end: _Swing
+) -> float:
+    duration = max(1, end.position - start.position)
+    reference = max(1, reference_end.position - reference_start.position)
+    return duration / reference
+
+
+def _w2_minimum(cfg: ElliottWaveConfig) -> float:
+    return cfg.wave2_min_retrace if cfg.wave2_minimum_mode == "Chartking" else 0.14
+
+
+def _w4_minimum(cfg: ElliottWaveConfig) -> float:
+    if cfg.wave4_minimum_mode == "Chartking":
+        return cfg.wave4_min_retrace
+    return 0.14
+
+
+def _w3_maximum(cfg: ElliottWaveConfig) -> float:
+    return cfg.wave3_max_extension if cfg.wave3_maximum_mode == "Chartking 2700%" else 21.0
+
+
+def _internal_four_overlaps_one(
+    swings: list[_Swing], start_idx: int, end_idx: int, bullish: bool
+) -> bool:
+    if end_idx - start_idx < 5:
+        return False
+    wave1_internal = swings[start_idx + 1]
+    wave4_internal = swings[end_idx - 1]
+    return (
+        wave4_internal.price <= wave1_internal.price
+        if bullish
+        else wave4_internal.price >= wave1_internal.price
+    )
 
 
 def _candidate_ending_at(

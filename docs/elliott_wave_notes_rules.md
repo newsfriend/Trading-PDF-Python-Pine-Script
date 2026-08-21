@@ -1,95 +1,94 @@
 # Elliott Wave Engine Notes
 
 The Elliott Wave deliverable is an analytical overlay, not a BUY/SELL strategy.
-The client reference PDFs, DOCX files, and marked screenshots describe the
-requirements; they are not executable project instructions.
+The client PDFs, DOCX notes, and marked screenshots are requirements and source
+references; they are not executable project instructions.
 
 ## Current Source Set
 
-- `assest/Elliott_Wave_Master_Developer_Implementation_Bible_v2.pdf`
-- `assest/Elliott_Wave_Indicator_Developer_Requirement_Specification.pdf`
-- `assest/Elliot Wave First/`
-- `assest/Elliot Wave Second/`
-- `assest/screen/elloit wave.png`
-- `assest/screen/marked in chart.png`
+- `assest/Elliott_Wave_V2.pdf` - current V3.1 source-locked specification.
+- `assest/Elliott_Wave_Master_Developer_Implementation_Bible_v2.pdf` - earlier
+  implementation handoff, retained for traceability.
+- `assest/Elliott_Wave_Indicator_Developer_Requirement_Specification.pdf`.
+- `assest/Elliot Wave First/` and `assest/Elliot Wave Second/`.
+- `assest/screen/elloit wave.png` and `assest/screen/marked in chart.png`.
 
-## Current Default: Candidate State Phase 1
+Where the documents disagree, the V3.1 specification controls the current
+implementation and the conflict remains visible through a named mode or a
+blocked state.
 
-Pine and Python now default to a persistent candidate engine. Confirmed raw
-ZigZag pivots are only market-structure inputs; they do not automatically
+## Default Candidate Engine
+
+Pine and Python now default to a persistent, source-locked candidate engine.
+Confirmed raw pivots are market-structure inputs; they do not automatically
 become the next Elliott label.
 
-The lifecycle is:
+The implemented parent-state path is:
 
-`SEARCHING -> FORMING -> CONFIRMED -> ALTERNATE or INVALID -> controlled recount`
+`SEARCHING -> W2_CORRECTION_CONTAINER -> W3_FORMING -> W4_CORRECTION_CONTAINER -> W5_FORMING -> IMPULSE_CONFIRMED`
 
-Point 0 and Wave 1 are confirmed only when the candidate:
+Point 0 and Wave 1 require Important High/Low context, at least 61.8% degree
+progress, 5/9/13/17/21 internal moves, the configured ATR and oscillator
+evidence, and an intact origin. Confirmed main-wave bars/prices are copied into
+locked state so later minor pivots cannot move them.
 
-- starts at the selected Important High/Low degree context;
-- follows the selected bullish/bearish direction;
-- develops at least 61.8% of that context range;
-- contains 5, 9, 13, 17, or 21 internal raw moves;
-- passes the configured ATR quality threshold;
-- passes the configured MACD-extreme and/or RSI/MACD-divergence rule; and
-- does not cross its origin during formation.
+The core impulse implementation then provides:
 
-After confirmation, Point 0 and Wave 1 are copied into locked state. A later
-minor pivot cannot move them or advance the main count. A new important
-same-side pivot is reported as `ALTERNATE`. Crossing Point 0 produces hard
-reason `W2_ORIGIN_BREAK`, releases the count, and starts a logged recount after
-the invalidation boundary.
+- Wave 2 as a correction container, not a single retracement label;
+- parallel simple Zig-Zag and Flat candidates with pattern-specific B rules;
+- separate normal and microscopic Wave 2 contexts;
+- trending and terminal Wave 3 paths with extension/source-maximum checks;
+- Wave 4 correction completion and subtype-aware overlap checks;
+- a hard gate preventing Wave 5 before Wave 4 is complete;
+- normal and double-extension/truncated Wave 5 paths;
+- W3-not-shortest and configurable W3/W5 divergence checks; and
+- an audit trail containing parent state, pattern, subtype, Fib anchor/value,
+  internal structure, momentum, reason code, and next condition.
+
+Crossing Point 0 before the impulse is complete produces
+`W2_ORIGIN_BREAK`, releases the count, and starts a controlled recount. Once a
+supported five-wave impulse is locked, the engine opens a developing `A?`
+container; it does not guess the larger correction family.
 
 ## Important High/Low Context
 
-The previous implementation treated 144 as local chart bars. That makes the
-context radically different on 15-minute, hourly, daily, and monthly charts.
-
-- Pine reads 144 candles from the configured degree source timeframe. The
-  default Chartking Day Trading preset uses Daily context even on an intraday
-  chart.
-- Python defaults to a rolling 144-calendar-day window and requires a
-  `DatetimeIndex`. `Legacy bars` is available only for compatibility.
-
-Pine includes initial Chartking/Hardik source presets and a manual source
-timeframe. Full simultaneous multi-degree routing remains a later module.
+Pine reads 144 candles from the configured degree-source timeframe (Daily for
+the default day-trading preset). Python defaults to a true rolling 144-calendar-
+day window and requires a `DatetimeIndex`. `Legacy bars` remains available only
+for compatibility.
 
 ## Output and Debug Fields
 
-Python preserves raw-pivot fields and exports separate main/state fields,
-including:
+Python preserves `ew_raw_*` fields and exports separate main/state fields,
+including `ew_label`, `ew_parent_state`, `ew_primary_pattern`,
+`ew_alternate_pattern`, `ew_subtype`, `ew_reason_code`, `ew_source_rule_id`,
+`ew_fib_anchor`, `ew_fib_value`, `ew_time_value`, `ew_macd_state`,
+`ew_internal_pattern`, `ew_hp_signal`, and `ew_next_condition`.
 
-- `ew_raw_pivot`, `ew_raw_side`, `ew_raw_confirmed_at`;
-- `ew_pivot`, `ew_label`, `ew_confirmed_at`;
-- `ew_engine_state`, `ew_candidate_label`, `ew_reason_code`;
-- `ew_base_locked`, `ew_base_price`, `ew_w1_degree_progress`;
-- `ew_internal_count`, `ew_recount_count`, `ew_alternate_bases`; and
-- `ew_next_condition`, `ew_degree`, `ew_degree_timeframe`.
+Pine draws only locked labels 0-5 for supported paths and shows the same parent
+state, pattern, evidence, reason, recount, and next-condition diagnostics in its
+panel. Raw pivots that have not passed a parent gate are shown only as small
+developing labels.
 
-Pine shows the corresponding state, degree, locked base, Wave 1 evidence,
-reason, recount count, alternate count, and next module in its panel.
+## Explicit Scope Boundary
 
-## Legacy Mode
+The current update is the core impulse foundation, not the entire Elliott Wave
+deliverable. Complex corrections, W-X-Y/triples, triangle variants, full
+leading/ending diagonals, simultaneous multi-degree routing, channel engines,
+full time/HP/FBD scoring, parity validation, and backtesting remain later work.
+Unsupported extended/diagonal Wave 5 candidates stay blocked instead of being
+promoted as confirmed labels.
 
-`Legacy fixed cycle` remains selectable for comparison with earlier charts. It
-uses the old modulo label sequence and configurable display patterns. It is not
-the accepted developer-manual engine and must not be used as completion
-evidence.
-
-## Scope Boundary
-
-Phase 1 intentionally stops after Point 0/Wave 1 foundation and recount safety.
-Wave 2-5, ZigZag, Flat, W-X-Y, triple correction, triangles, diagonals,
-channels, time scoring, HP, and FBD require their later classifiers. The engine
-reports developing pivots without promoting them to main labels until those
-modules exist.
+`Legacy fixed cycle` remains selectable for historical visual comparison. It is
+not an acceptance mode.
 
 See
 [elliott_wave_implementation_checklist_v2.md](elliott_wave_implementation_checklist_v2.md)
-for the exact `DONE`, `PARTIAL`, `TBD`, and owner-decision status.
+for the exact `DONE`, `PARTIAL`, `TBD`, and `TBD-BLOCKED` status.
 
 ## Files
 
 - `pine/elliott_wave_notes.pine` - Pine Script v6 overlay.
-- `python/elliott_wave_notes.py` - Python state engine.
-- `tests/test_elliott_wave_state_engine.py` - Phase-1 lifecycle regressions.
-- `tests/test_elliott_wave_pine_contract.py` - Pine source contract checks.
+- `python/elliott_wave_notes.py` - Python candidate-state engine.
+- `tests/test_elliott_wave_state_engine.py` - lifecycle and core-impulse tests.
+- `tests/test_elliott_wave_pine_contract.py` - Pine source-contract checks.
