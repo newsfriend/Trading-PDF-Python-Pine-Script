@@ -61,12 +61,14 @@ now provides:
   candidates and pattern-specific B-wave ranges.
 - Trending/terminal Wave 3 and normal/truncated Wave 5 paths, including
   extension, overlap, shortest-wave, and divergence checks.
-- Persistent labels 0-5 with a parent-state gate that prevents premature Wave 5.
+- Persistent labels 0-5 followed by validated A-B-C, with parent-state gates
+  that prevent premature Wave 5 or correction labels.
+- Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.
 - Auditable pattern, subtype, Fib, time, momentum, reason, and next-condition
   output.
 
-This is the core impulse foundation, not the complete Elliott Wave deliverable.
-Complex corrections, W-X-Y/triples, triangle variants, full diagonals,
+This covers the core impulse and simple larger A-B-C transition, not the
+complete V4.0 Elliott Wave deliverable. Complex W-X-Y/triples, triangle variants, full diagonals,
 multi-degree routing, parity validation, and backtesting remain later phases.
 Unsupported paths remain visibly blocked instead of being guessed. The old
 modulo-style sequence is available only as `Legacy fixed cycle` comparison mode.

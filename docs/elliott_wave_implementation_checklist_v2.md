@@ -1,4 +1,4 @@
-# Elliott Wave V3.1 - Source-Locked Implementation Checklist
+# Elliott Wave V4.0 - Source-Locked Implementation Checklist
 
 This checklist maps the client-provided developer specification to the current
 code. The reference documents describe requirements; they are not executable
@@ -9,10 +9,10 @@ engine.
 
 ## Authoritative Source
 
-The current implementation source is `assest/Elliott_Wave_V2.pdf`, titled
-*Elliott Wave / NeoWave - 100% Source-Locked Master Developer Specification
-V3.1*. It supersedes the earlier implementation handoff where the two documents
-differ. The older manuals and chart images remain as supporting references.
+The binding source is
+`assest/Elliott_Wave_V4_0_Merged_Zero_Knowledge_Developer_Master_FINAL.pdf`.
+It includes the V3.3 locked handoff and supersedes V3.1 where wording differs.
+The older manuals and chart images remain supporting references.
 
 ## Phase 1 / P0 Acceptance Gate
 
@@ -53,7 +53,7 @@ differ. The older manuals and chart images remain as supporting references.
 | Six triangle variants | TBD | Contracting, expanding, barrier, running, and reverse variants with A-B-C-D-E validation. |
 | Leading and ending diagonal classifiers | TBD | Overlap, converging/diverging trend lines, and internal 3/5-wave rules. |
 | Channel, time, momentum, HP and FBD support engines | PARTIAL | Momentum diagnostics and HP eligibility exist. They do not mutate the count; full project filters and scoring are pending. |
-| Automatic larger correction after Wave 5 | TBD | The engine stops at `IMPULSE_CONFIRMED` and opens an `A?` correction container without inventing a pattern. |
+| Automatic larger correction after Wave 5 | PARTIAL | Both engines now transition into `LARGER_CORRECTION_CONTAINER` and lock actual A-B-C pivots for complete Zig-Zag/Flat paths. W-X-Y, triples and triangles remain pending. |
 | Double-confirmation outcome | TBD-BLOCKED | Conflicting source interpretations require an owner decision. |
 | Pine/Python candle-for-candle parity | PARTIAL | State semantics/settings are aligned; identical exported market data still needs comparison. |
 | Backtesting acceptance | TBD | Requires completed classifiers, deterministic signal policy, datasets, and client-approved expected counts. |

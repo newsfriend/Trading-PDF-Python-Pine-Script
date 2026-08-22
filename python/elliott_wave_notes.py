@@ -4,12 +4,10 @@ The confirmed pivot/ATR layer is only a raw market-structure provider.  Main
 Elliott labels are emitted by a persistent candidate lifecycle so that a new
 minor pivot cannot advance or restart the main-degree count by itself.
 
-The source-locked candidate engine implements the P0 foundation plus the core
-Wave 1-5 impulse sequence: correction-container gates for Waves 2 and 4,
-trending/terminal Wave 3 classification, normal/truncated Wave 5 paths,
-hard invalidation, and controlled recount audit fields.  Complex corrections,
-full diagonals, and multi-degree routing remain explicitly pending rather than
-being simulated with modulo labels.
+The source-locked candidate engine implements the P0 foundation, the core
+Wave 1-5 impulse sequence, and the mandatory transition into a larger A-B-C
+correction container. Labels are promoted only after their structure gates
+pass; raw pivots never advance the main count by position or modulo arithmetic.
 """
 
 from __future__ import annotations
@@ -56,7 +54,7 @@ class ElliottWaveConfig:
     anchor_direction: str = "Auto"
     important_atr_length: int = 14
     important_atr_multiple: float = 1.0
-    rsi_length: int = 14
+    rsi_length: int = 13
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
@@ -77,7 +75,7 @@ class ElliottWaveConfig:
     wave4_min_retrace: float = 0.236
     wave4_max_retrace: float = 0.50
     wave4_terminal_max_retrace: float = 0.618
-    flat_a_max_retrace: float = 0.618
+    flat_a_min_retrace: float = 0.382
     flat_b_min_retrace: float = 0.618
     flat_b_max_retrace: float = 1.11
     wave5_min_extension: float = 1.27
@@ -85,7 +83,8 @@ class ElliottWaveConfig:
     wave5_divergence_mode: str = "Support"
     time_rule_mode: str = "Diagnostic all sources"
     hp_signal_mode: str = "Disabled until project filters"
-    time_tolerance: float = 0.25
+    time_tolerance_bars: int = 8
+    diagnostic_time_tolerance_ratio: float = 0.25
     w1_internal_move_counts: tuple[int, ...] = (5, 9, 13, 17, 21)
 
 
@@ -265,6 +264,8 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         raise ValueError("Wave 3 extension thresholds must be positive")
     if cfg.flat_b_max_retrace < cfg.flat_b_min_retrace:
         raise ValueError("flat_b_max_retrace must be greater than or equal to flat_b_min_retrace")
+    if cfg.time_tolerance_bars < 0:
+        raise ValueError("time_tolerance_bars cannot be negative")
 
 
 def _normalize_ohlc(candles: pd.DataFrame) -> pd.DataFrame:
@@ -529,8 +530,9 @@ def _compute_candidate_state(
         for fib_ratio, fib_name in _FIB_LEVELS:
             common[f"ew_anchor_fib_{fib_name}"] = _anchor_fib_price(base, fib_ratio)
 
+        phase_by_label = {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "A": 6, "B": 7, "C": 8}
         for label, wave in active["waves"].items():
-            phase = int(label)
+            phase = phase_by_label[label]
             swing = swings[int(wave["swing_idx"])]
             for column, value in common.items():
                 result.loc[swing.index, column] = value
@@ -562,7 +564,7 @@ def _compute_candidate_state(
 
     result.attrs["elliott_wave_state"] = {
         "engine": "Candidate State",
-        "phase": "Phase 2 / core impulse",
+        "phase": "V4.0 motive and larger-correction sequence",
         "state": active["parent_state"] if active is not None else lifecycle["final_state"],
         "base_locked": active is not None,
         "confirmed_labels": list(active["waves"].keys()) if active is not None else [],
@@ -570,7 +572,7 @@ def _compute_candidate_state(
         "alternate_base_count": lifecycle["alternate_count"],
         "last_reason_code": lifecycle["last_reason_code"],
         "pending_modules": [
-            "complex correction families beyond simple ABC",
+            "double/triple and triangle correction families",
             "full diagonal classifier",
             "full multi-degree routing",
             "owner-blocked conflict decisions",
@@ -610,7 +612,7 @@ def _run_candidate_state(
 
     for swing_index in ordered_indices:
         swing = swings[swing_index]
-        if active is not None and active["parent_state"] != "IMPULSE_CONFIRMED":
+        if active is not None and _origin_protection_active(str(active["parent_state"])):
             break_position = _origin_break_position(
                 source,
                 active,
@@ -779,7 +781,7 @@ def _run_candidate_state(
     if (
         active is not None
         and source is not None
-        and active["parent_state"] != "IMPULSE_CONFIRMED"
+        and _origin_protection_active(str(active["parent_state"]))
     ):
         tail_break = _origin_break_position(
             source,
@@ -853,6 +855,29 @@ def _make_wave_record(
         "hp_signal": hp_signal,
         "confidence": confidence,
     }
+
+
+def _origin_protection_active(parent_state: str) -> bool:
+    """Point 0 is a hard invalidation only while the motive count is forming."""
+
+    return parent_state in {
+        "W2_CORRECTION_CONTAINER",
+        "W3_FORMING",
+        "W4_CORRECTION_CONTAINER",
+        "W5_FORMING",
+    }
+
+
+def _larger_correction_candidate_label(move_count: int, cfg: ElliottWaveConfig) -> str:
+    """Return only a developing label; actual A/B/C labels lock on completion."""
+
+    minimum_a = min(cfg.w1_internal_move_counts)
+    minimum_b = 3
+    if move_count < minimum_a:
+        return "A?"
+    if move_count < minimum_a + minimum_b:
+        return "B?"
+    return "C?"
 
 
 def _transition(
@@ -1191,8 +1216,8 @@ def _advance_impulse_state(
                 internal_count=internal_count,
             )
             waves["5"] = record
-            active["parent_state"] = "IMPULSE_CONFIRMED"
-            active["next_condition"] = "Five-wave impulse locked; open the larger correction candidate engine."
+            active["parent_state"] = "LARGER_CORRECTION_CONTAINER"
+            active["next_condition"] = "Five-wave impulse locked; classify the larger correction in parallel."
             return _transition(
                 status="CONFIRMED",
                 candidate_label="5",
@@ -1211,7 +1236,7 @@ def _advance_impulse_state(
             )
         reason = "W5_W3_SHORTEST" if w3_shortest else "W5_INTERNAL_FAIL" if not internal_valid else "W5_PRICE_SUBTYPE_PENDING"
         return _transition(
-            status="INVALID" if w3_shortest else "TBD_BLOCKED" if ratio > cfg.wave5_max_extension else "FORMING",
+            status="INVALID" if w3_shortest else "FORMING",
             candidate_label="5?" if correct_side else "",
             pattern="Motive",
             subtype="W5_EXTENSION_TBD" if ratio > cfg.wave5_max_extension else "W5_CANDIDATE",
@@ -1226,14 +1251,85 @@ def _advance_impulse_state(
             internal_count=internal_count,
         )
 
+    if state == "LARGER_CORRECTION_CONTAINER":
+        start_idx = int(waves["5"]["swing_idx"])
+        correction = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
+        terminal = swings[end_idx]
+        correct_side = terminal.kind == (-1 if bullish else 1)
+        if correction["confirmed"] and correct_side:
+            endpoint_indices = correction["endpoint_indices"]
+            for label, endpoint_idx in zip(("A", "B", "C"), endpoint_indices):
+                endpoint = swings[int(endpoint_idx)]
+                waves[label] = _make_wave_record(
+                    swing_idx=int(endpoint_idx),
+                    pattern=str(correction["primary"]),
+                    subtype=f"{correction['primary'].upper().replace('-', '_')}_{label}",
+                    reason_code=f"{label}_CONFIRMED",
+                    source_rule_id="V4-C10-C16-LARGER-CORRECTION",
+                    note=(
+                        f"Larger {correction['primary']} Wave {label} confirmed at "
+                        f"{endpoint.confirmed_index}."
+                    ),
+                    fib_anchor="Wave 5 correction origin",
+                    fib_value=(
+                        float(correction["b_ratio"])
+                        if label == "B"
+                        else float(correction["c_vs_a"])
+                        if label == "C"
+                        else np.nan
+                    ),
+                    internal_pattern=str(correction["internal_pattern"]),
+                    internal_count=int(correction[f"{label.lower()}_count"]),
+                    alternate=str(correction["alternate"]),
+                )
+            active["parent_state"] = "CORRECTION_CONFIRMED"
+            active["next_condition"] = "The 1-2-3-4-5 then A-B-C cycle is complete; wait for the next qualified Point 0."
+            return _transition(
+                status="CONFIRMED",
+                candidate_label="C",
+                pattern=str(correction["primary"]),
+                subtype="LARGER_CORRECTION_COMPLETE",
+                reason_code="CORRECTION_COMPLETE",
+                note=(
+                    f"Larger {correction['primary']} completed as "
+                    f"{correction['internal_pattern']}; A-B-C labels locked on actual pivots."
+                ),
+                next_condition=active["next_condition"],
+                source_rule_id="V4-C10-C16-LARGER-CORRECTION",
+                alternate_pattern=str(correction["alternate"]),
+                fib_anchor="Wave 5 correction origin",
+                fib_value=float(correction["c_vs_a"]),
+                internal_pattern=str(correction["internal_pattern"]),
+                internal_count=int(correction["internal_count"]),
+            )
+
+        candidate_label = _larger_correction_candidate_label(
+            end_idx - start_idx, cfg
+        )
+        return _transition(
+            candidate_label=candidate_label,
+            pattern=str(correction["primary"]),
+            subtype="LARGER_CORRECTION_CONTAINER",
+            reason_code=str(correction["reason_code"]),
+            note=(
+                "The motive 1-2-3-4-5 count is locked. The larger correction "
+                f"remains FORMING: {correction['note']}"
+            ),
+            next_condition="Need an actual completed terminal C (or later Y/Z/E family) before confirmation.",
+            source_rule_id="V4-C10-C21-LARGER-CORRECTION",
+            alternate_pattern=str(correction["alternate"]),
+            internal_pattern=str(correction["internal_pattern"]),
+            internal_count=int(correction["internal_count"]),
+        )
+
     return _transition(
-        candidate_label="A?",
-        pattern="Larger correction",
-        subtype="CORRECTION_CONTAINER",
-        reason_code="LARGER_CORRECTION_PENDING",
-        note="The five-wave impulse is locked; larger automatic correction classification is the next module.",
-        next_condition="Maintain Zig-Zag/Flat/Double/Triple/Triangle candidates in parallel.",
-        source_rule_id="V3-P27-29-CORRECTIONS",
+        status="CONFIRMED",
+        pattern="Completed market cycle",
+        subtype="MOTIVE_PLUS_CORRECTION",
+        reason_code="CYCLE_COMPLETE",
+        note="Confirmed 1-2-3-4-5 motive sequence followed by confirmed A-B-C correction.",
+        next_condition="Wait for the next independently qualified Point 0 candidate.",
+        source_rule_id="V4-MARKET-CYCLE",
     )
 
 
@@ -1255,14 +1351,22 @@ def _evaluate_simple_correction(
                     swings, start_idx, a_count, b_count, c_count
                 )
                 if (
-                    0.01 <= candidate["b_ratio"] <= 0.50
-                    and candidate["c_vs_b"] >= 1.27
+                    0.01 <= candidate["b_ratio"] <= 0.618
+                    and 0.618 <= candidate["c_vs_a"] <= 4.618
                 ):
                     candidates.append(
                         {
                             **candidate,
                             "pattern": "Zig-Zag",
                             "internal_pattern": f"{a_count}-{b_count}-{c_count}",
+                            "a_count": a_count,
+                            "b_count": b_count,
+                            "c_count": c_count,
+                            "endpoint_indices": (
+                                start_idx + a_count,
+                                start_idx + a_count + b_count,
+                                end_idx,
+                            ),
                         }
                     )
 
@@ -1283,6 +1387,14 @@ def _evaluate_simple_correction(
                             **candidate,
                             "pattern": "Flat",
                             "internal_pattern": f"{a_count}-{b_count}-{c_count}",
+                            "a_count": a_count,
+                            "b_count": b_count,
+                            "c_count": c_count,
+                            "endpoint_indices": (
+                                start_idx + a_count,
+                                start_idx + a_count + b_count,
+                                end_idx,
+                            ),
                         }
                     )
 
@@ -1294,6 +1406,12 @@ def _evaluate_simple_correction(
             "primary": primary["pattern"],
             "alternate": alternate,
             "b_ratio": primary["b_ratio"],
+            "c_vs_a": primary["c_vs_a"],
+            "c_vs_b": primary["c_vs_b"],
+            "a_count": primary["a_count"],
+            "b_count": primary["b_count"],
+            "c_count": primary["c_count"],
+            "endpoint_indices": primary["endpoint_indices"],
             "internal_pattern": primary["internal_pattern"],
             "internal_count": end_idx - start_idx,
             "reason_code": "CORRECTION_CONFIRMED",
@@ -1314,6 +1432,12 @@ def _evaluate_simple_correction(
         "primary": "Zig-Zag / Flat",
         "alternate": "",
         "b_ratio": b_ratio,
+        "c_vs_a": np.nan,
+        "c_vs_b": np.nan,
+        "a_count": 0,
+        "b_count": 0,
+        "c_count": 0,
+        "endpoint_indices": (),
         "internal_pattern": "parallel candidates",
         "internal_count": max(0, end_idx - start_idx),
         "reason_code": reason,
@@ -1650,7 +1774,7 @@ def _rule_state(
         equal12 = abs(time1 - time2) <= time1 * 0.05
         expected3 = time1 + time2 if equal12 else (time1 + time2) / 2.0
         time_ratio = _safe_ratio(time3, expected3)
-        time_warning = abs(time_ratio - 1.0) > cfg.time_tolerance
+        time_warning = abs(time_ratio - 1.0) > cfg.diagnostic_time_tolerance_ratio
         warning = ratio < cfg.wave3_min_extension or time_warning
         return _state(False, warning), (
             f"Wave 3={ratio:.2%} of Wave 1, time={time3} bars vs rule {expected3:.2f}"
@@ -1661,9 +1785,9 @@ def _rule_state(
         p3 = swings[cycle_start + 3].price
         p_a = swings[cycle_start + 4].price
         retrace = _safe_ratio(abs(p3 - p_a), abs(p3 - p2))
-        warning = retrace > cfg.flat_a_max_retrace
+        warning = retrace < cfg.flat_a_min_retrace
         return _state(False, warning), (
-            f"Wave 4 A retrace={retrace:.2%} of W3, flat max={cfg.flat_a_max_retrace:.2%}"
+            f"Wave 4 A retrace={retrace:.2%} of W3, flat minimum={cfg.flat_a_min_retrace:.2%}"
         ), None, duration, retrace
 
     if cfg.show_wave4_internal and phase == 5 and wave_index >= 5:
@@ -1690,7 +1814,9 @@ def _rule_state(
         time2 = max(1, t2 - t1)
         time4 = max(1, t4 - t3)
         time_ratio = _safe_ratio(time4, time2)
-        time_warning = not _near_any(time_ratio, (0.5, 2.0, 3.0), cfg.time_tolerance)
+        time_warning = not _near_any(
+            time_ratio, (0.5, 2.0, 3.0), cfg.diagnostic_time_tolerance_ratio
+        )
         invalid = p4 <= p1 if bullish else p4 >= p1
         warning = retrace < cfg.wave4_min_retrace or retrace > cfg.wave4_max_retrace or time_warning
         label = "Wave 4/C" if cfg.show_wave4_internal else "Wave 4"

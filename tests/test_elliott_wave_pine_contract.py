@@ -12,7 +12,7 @@ class ElliottWavePineContractTests(unittest.TestCase):
 
     def test_candidate_state_is_the_default_engine(self):
         self.assertIn(
-            'input.string("Candidate State (Core Impulse)", "Engine mode"',
+            'input.string("Candidate State (V4 Full Cycle)", "Engine mode"',
             self.source,
         )
 
@@ -36,7 +36,7 @@ class ElliottWavePineContractTests(unittest.TestCase):
             'engineStage := "W3_FORMING"',
             'engineStage := "W4_CORRECTION_CONTAINER"',
             'engineStage := "W5_FORMING"',
-            'engineStage := "IMPULSE_CONFIRMED"',
+            'engineStage := "LARGER_CORRECTION_CONTAINER"',
         ):
             self.assertIn(state, self.source)
 
@@ -46,13 +46,32 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertLess(wave4_confirmation, wave5_lock)
 
     def test_structure_specific_correction_ranges_are_present(self):
-        self.assertIn("bRatio >= 0.01 and bRatio <= 0.50", self.source)
+        self.assertIn("bRatio >= 0.01 and bRatio <= 0.618", self.source)
         self.assertIn("bRatio >= flatBMinRetrace", self.source)
         self.assertIn("bRatio <= flatBMaxRetrace", self.source)
 
     def test_locked_main_labels_include_complete_impulse(self):
         for label in ('text="2"', 'text="3"', 'text="4"', 'text="5"'):
             self.assertIn(label, self.source)
+
+    def test_completed_impulse_opens_and_draws_larger_abc(self):
+        self.assertIn('engineStage := "LARGER_CORRECTION_CONTAINER"', self.source)
+        self.assertIn('lastReasonCode := "CORRECTION_COMPLETE"', self.source)
+        for label in ('text="A"', 'text="B"', 'text="C"'):
+            self.assertIn(label, self.source)
+
+    def test_v4_closed_bar_alert_contract_is_present(self):
+        for alert_name in (
+            "EW FORMING",
+            "EW CONFIRMED",
+            "EW INVALID",
+            "EW CONTROLLED RECOUNT",
+            "EW CORRECTION COMPLETE",
+            "EW HP BUY",
+            "EW HP SELL",
+        ):
+            self.assertIn(f'alertcondition(stateChanged', self.source)
+            self.assertIn(f'"{alert_name}"', self.source)
 
 
 if __name__ == "__main__":

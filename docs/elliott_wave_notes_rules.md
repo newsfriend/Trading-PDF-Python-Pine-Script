@@ -6,16 +6,17 @@ references; they are not executable project instructions.
 
 ## Current Source Set
 
-- `assest/Elliott_Wave_V2.pdf` - current V3.1 source-locked specification.
+- `assest/Elliott_Wave_V4_0_Merged_Zero_Knowledge_Developer_Master_FINAL.pdf`
+  - binding V4.0 specification, including the appended V3.3 locked handoff.
+- `assest/Elliott_Wave_V2.pdf` - earlier V3.1 source-locked detail.
 - `assest/Elliott_Wave_Master_Developer_Implementation_Bible_v2.pdf` - earlier
   implementation handoff, retained for traceability.
 - `assest/Elliott_Wave_Indicator_Developer_Requirement_Specification.pdf`.
 - `assest/Elliot Wave First/` and `assest/Elliot Wave Second/`.
 - `assest/screen/elloit wave.png` and `assest/screen/marked in chart.png`.
 
-Where the documents disagree, the V3.1 specification controls the current
-implementation and the conflict remains visible through a named mode or a
-blocked state.
+Where the documents disagree, V4.0 controls, followed by its embedded V3.3
+resolutions and acceptance fixtures.
 
 ## Default Candidate Engine
 
@@ -25,7 +26,7 @@ become the next Elliott label.
 
 The implemented parent-state path is:
 
-`SEARCHING -> W2_CORRECTION_CONTAINER -> W3_FORMING -> W4_CORRECTION_CONTAINER -> W5_FORMING -> IMPULSE_CONFIRMED`
+`SEARCHING -> W2_CORRECTION_CONTAINER -> W3_FORMING -> W4_CORRECTION_CONTAINER -> W5_FORMING -> LARGER_CORRECTION_CONTAINER -> CORRECTION_CONFIRMED`
 
 Point 0 and Wave 1 require Important High/Low context, at least 61.8% degree
 progress, 5/9/13/17/21 internal moves, the configured ATR and oscillator
@@ -47,8 +48,10 @@ The core impulse implementation then provides:
 
 Crossing Point 0 before the impulse is complete produces
 `W2_ORIGIN_BREAK`, releases the count, and starts a controlled recount. Once a
-supported five-wave impulse is locked, the engine opens a developing `A?`
-container; it does not guess the larger correction family.
+supported five-wave impulse is locked, the engine opens a developing correction
+container. A, B, and C are locked on their actual pivots only after a complete
+Zig-Zag or Flat terminal structure passes. Point 0 no longer invalidates the
+already-completed impulse during its following larger correction.
 
 ## Important High/Low Context
 
@@ -65,19 +68,19 @@ including `ew_label`, `ew_parent_state`, `ew_primary_pattern`,
 `ew_fib_anchor`, `ew_fib_value`, `ew_time_value`, `ew_macd_state`,
 `ew_internal_pattern`, `ew_hp_signal`, and `ew_next_condition`.
 
-Pine draws only locked labels 0-5 for supported paths and shows the same parent
+Pine draws locked labels 0-5 and A-B-C for supported paths and shows the same parent
 state, pattern, evidence, reason, recount, and next-condition diagnostics in its
 panel. Raw pivots that have not passed a parent gate are shown only as small
 developing labels.
 
 ## Explicit Scope Boundary
 
-The current update is the core impulse foundation, not the entire Elliott Wave
-deliverable. Complex corrections, W-X-Y/triples, triangle variants, full
+The current update covers the core impulse and simple larger A-B-C transition,
+not the entire V4.0 deliverable. W-X-Y/triples, triangle variants, full
 leading/ending diagonals, simultaneous multi-degree routing, channel engines,
 full time/HP/FBD scoring, parity validation, and backtesting remain later work.
-Unsupported extended/diagonal Wave 5 candidates stay blocked instead of being
-promoted as confirmed labels.
+Unsupported extended/diagonal Wave 5 candidates remain FORMING or INVALID and
+are never promoted by pivot order.
 
 `Legacy fixed cycle` remains selectable for historical visual comparison. It is
 not an acceptance mode.

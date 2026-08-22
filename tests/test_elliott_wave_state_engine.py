@@ -100,6 +100,14 @@ def _through_w5():
     return swings
 
 
+def _through_larger_abc():
+    swings = _through_w5()
+    _append_prices(swings, [160, 168, 150, 158, 140])  # A: 5 moves
+    _append_prices(swings, [150, 145, 157.5])  # B: 3 moves, 50% of A
+    _append_prices(swings, [145, 150, 130, 138, 115])  # C: 5 moves
+    return swings
+
+
 class ElliottWaveCandidateStateTests(unittest.TestCase):
     def setUp(self):
         self.config = ElliottWaveConfig(important_context_mode="Legacy bars")
@@ -273,12 +281,20 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
     def test_t12_normal_w5_checks_projection_and_degree_divergence(self):
         state = _run_candidate_state(_through_w5(), self.config)
 
-        self.assertEqual(state["active"]["parent_state"], "IMPULSE_CONFIRMED")
+        self.assertEqual(state["active"]["parent_state"], "LARGER_CORRECTION_CONTAINER")
         self.assertEqual(state["active"]["waves"]["5"]["subtype"], "W5_NORMAL")
         self.assertEqual(
             state["active"]["waves"]["5"]["macd_state"],
             "W3/W5 DIVERGENCE PASS",
         )
+
+    def test_v4_larger_correction_locks_abc_after_wave5(self):
+        state = _run_candidate_state(_through_larger_abc(), self.config)
+
+        self.assertEqual(state["active"]["parent_state"], "CORRECTION_CONFIRMED")
+        self.assertEqual(list(state["active"]["waves"]), ["0", "1", "2", "3", "4", "5", "A", "B", "C"])
+        self.assertEqual(state["active"]["waves"]["C"]["reason_code"], "C_CONFIRMED")
+        self.assertEqual(state["last_reason_code"], "CORRECTION_COMPLETE")
 
     def test_t13_truncated_w5_uses_double_extension_context(self):
         swings = [_swing(0, 0, -1, important=True, macd_extreme=True)]
