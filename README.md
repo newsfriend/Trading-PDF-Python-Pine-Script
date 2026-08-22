@@ -61,6 +61,7 @@ now provides:
   candidates and pattern-specific B-wave ranges.
 - Trending/terminal Wave 3 and normal/truncated Wave 5 paths, including
   extension, overlap, shortest-wave, and divergence checks.
+- Mandatory V4 closed-bar confirmation windows for Waves 2-5.
 - Persistent labels 0-5 followed by validated A-B-C, with parent-state gates
   that prevent premature Wave 5 or correction labels.
 - Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.

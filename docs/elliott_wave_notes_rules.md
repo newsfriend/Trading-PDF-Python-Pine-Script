@@ -42,6 +42,7 @@ The core impulse implementation then provides:
 - Wave 4 correction completion and subtype-aware overlap checks;
 - a hard gate preventing Wave 5 before Wave 4 is complete;
 - normal and double-extension/truncated Wave 5 paths;
+- mandatory V4 closed-bar time windows for Waves 2, 3, 4, and 5;
 - W3-not-shortest and configurable W3/W5 divergence checks; and
 - an audit trail containing parent state, pattern, subtype, Fib anchor/value,
   internal structure, momentum, reason code, and next condition.

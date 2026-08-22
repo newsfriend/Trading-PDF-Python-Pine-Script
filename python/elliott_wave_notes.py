@@ -82,7 +82,7 @@ class ElliottWaveConfig:
     wave5_max_extension: float = 2.618
     wave5_divergence_mode: str = "Support"
     time_rule_mode: str = "Diagnostic all sources"
-    hp_signal_mode: str = "Disabled until project filters"
+    hp_signal_mode: str = "Structure confirmation only"
     time_tolerance_bars: int = 8
     diagnostic_time_tolerance_ratio: float = 0.25
     w1_internal_move_counts: tuple[int, ...] = (5, 9, 13, 17, 21)
@@ -232,8 +232,8 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
     }:
         raise ValueError("Unsupported time_rule_mode")
     if cfg.hp_signal_mode not in {
-        "Disabled until project filters",
         "Structure confirmation only",
+        "Disabled",
     }:
         raise ValueError("Unsupported hp_signal_mode")
     if not cfg.w1_internal_move_counts or any(
@@ -921,6 +921,12 @@ def _advance_impulse_state(
         correct_side = p2.kind == (-1 if bullish else 1)
         retrace = _directional_retrace(p0.price, p1.price, p2.price, bullish)
         time_ratio = _duration_ratio(p1, p2, p0, p1)
+        time_gate = _matches_time_window(
+            p2.position - p1.position,
+            (p1.position - p0.position,),
+            (0.25, 0.50, 1.0, 2.0),
+            cfg.time_tolerance_bars,
+        )
         microscopic = bool(
             np.isfinite(retrace)
             and abs(retrace - cfg.microscopic_retrace) <= cfg.microscopic_tolerance
@@ -933,11 +939,9 @@ def _advance_impulse_state(
         subtype = "W2_MICROSCOPIC" if microscopic else "W2_NORMAL" if normal else "W2_OUTSIDE_NORMAL"
         hp_signal = (
             "HP BUY ELIGIBLE" if bullish else "HP SELL ELIGIBLE"
-        ) if deep and correction["confirmed"] else ""
-        if hp_signal and cfg.hp_signal_mode == "Disabled until project filters":
-            hp_signal += " - PROJECT FILTERS TBD"
+        ) if deep and correction["confirmed"] and time_gate and cfg.hp_signal_mode != "Disabled" else ""
 
-        if correct_side and correction["confirmed"] and (normal or microscopic):
+        if correct_side and correction["confirmed"] and (normal or microscopic) and time_gate:
             record = _make_wave_record(
                 swing_idx=end_idx,
                 pattern=str(correction["primary"]),
@@ -946,7 +950,7 @@ def _advance_impulse_state(
                 source_rule_id="V3-P24-25-W2",
                 note=(
                     f"Wave 2 {correction['primary']} completed; retracement={retrace:.2%}; "
-                    f"B={correction['b_ratio']:.2%}."
+                    f"B={correction['b_ratio']:.2%}; V4 time gate=PASS."
                 ),
                 fib_anchor="P0-P1 retracement",
                 fib_value=retrace,
@@ -978,7 +982,9 @@ def _advance_impulse_state(
             )
 
         reason = (
-            str(correction["reason_code"])
+            "W2_TIME_GATE_FAIL"
+            if correction["confirmed"] and (normal or microscopic) and not time_gate
+            else str(correction["reason_code"])
             if not correction["confirmed"]
             else "W2_RETRACE_OUTSIDE_NORMAL"
         )
@@ -1023,6 +1029,30 @@ def _advance_impulse_state(
         max_pass = np.isfinite(ratio) and ratio <= _w3_maximum(cfg)
         macd_state = "W3 MOMENTUM SUPPORT" if p3.macd_extreme else "W3 MOMENTUM NOT EXTREME"
         if (trending or terminal) and max_pass:
+            w1_duration = p1.position - p0.position
+            w2_duration = p2.position - p1.position
+            w3_duration = p3.position - p2.position
+            time_gate = _matches_time_window(
+                w3_duration,
+                (w1_duration + w2_duration,),
+                (0.50, 1.0),
+                cfg.time_tolerance_bars,
+            )
+            if not time_gate:
+                return _transition(
+                    candidate_label="3?",
+                    pattern="Motive",
+                    subtype="W3_TIME_PENDING",
+                    reason_code="W3_TIME_GATE_FAIL",
+                    note=f"Wave 3 structure passes but duration {w3_duration} misses the V4 time windows.",
+                    next_condition="Wait for a valid (W1+W2)/2 or W1+W2 time window.",
+                    source_rule_id="V4-C06-W3-TIME",
+                    fib_anchor="P0-P1 projected from P2",
+                    fib_value=ratio,
+                    macd_state=macd_state,
+                    internal_pattern="5/9/13/17/21-move impulse",
+                    internal_count=internal_count,
+                )
             subtype = "W3_TRENDING" if trending else "W3_TERMINAL"
             if internal_count > 5:
                 subtype += "_EXTENDED"
@@ -1117,6 +1147,36 @@ def _advance_impulse_state(
             w2 = swings[int(waves["2"]["swing_idx"])]
             similarity = abs(float(waves["2"]["fib_value"]) - retrace)
             time_ratio = _duration_ratio(p3, p4, p1, w2)
+            w2_duration = w2.position - p1.position
+            w3_duration = p3.position - w2.position
+            w4_duration = p4.position - p3.position
+            time_gate = _matches_time_window(
+                w4_duration,
+                (w2_duration,),
+                (0.50, 2.0, 3.0, 5.0),
+                cfg.time_tolerance_bars,
+            ) or _matches_time_window(
+                w4_duration,
+                (w2_duration + w3_duration,),
+                (0.25, 0.50, 1.0),
+                cfg.time_tolerance_bars,
+            )
+            if not time_gate:
+                return _transition(
+                    candidate_label="4?",
+                    pattern=str(correction["primary"]),
+                    subtype="W4_TIME_PENDING",
+                    reason_code="W4_TIME_GATE_FAIL",
+                    note=f"Wave 4 structure passes but duration {w4_duration} misses the V4 time windows.",
+                    next_condition="W5 remains blocked until a permitted W4 time window passes.",
+                    source_rule_id="V4-C08-W4-TIME",
+                    alternate_pattern=str(correction["alternate"]),
+                    fib_anchor="Base-P3 retracement",
+                    fib_value=retrace,
+                    time_value=time_ratio,
+                    internal_pattern=str(correction["internal_pattern"]),
+                    internal_count=int(correction["internal_count"]),
+                )
             record = _make_wave_record(
                 swing_idx=end_idx,
                 pattern=str(correction["primary"]),
@@ -1198,6 +1258,35 @@ def _advance_impulse_state(
         )
         truncated = double_extension and ratio <= 0.812
         if internal_valid and not w3_shortest and divergence_pass and (normal or truncated):
+            w1_duration = p1.position - p0.position
+            w3_duration = p3.position - p2.position
+            w4_duration = p4.position - p3.position
+            w5_duration = p5.position - p4.position
+            time_targets = (
+                float(w1_duration),
+                float(w4_duration),
+                (w1_duration + w3_duration) / 4.0,
+                (w1_duration + w3_duration) / 2.0,
+                float(w1_duration + w3_duration),
+                (w3_duration + w4_duration) / 2.0,
+            )
+            if not _matches_absolute_time_targets(
+                w5_duration, time_targets, cfg.time_tolerance_bars
+            ):
+                return _transition(
+                    candidate_label="5?",
+                    pattern="Motive",
+                    subtype="W5_TIME_PENDING",
+                    reason_code="W5_TIME_GATE_FAIL",
+                    note=f"Wave 5 structure passes but duration {w5_duration} misses the V4 time windows.",
+                    next_condition="Wait for a permitted W5 time window; the completed W4 remains locked.",
+                    source_rule_id="V4-C09-W5-TIME",
+                    fib_anchor="P3-P4 projection",
+                    fib_value=ratio,
+                    macd_state="W3/W5 DIVERGENCE PASS" if divergence else "W3/W5 DIVERGENCE ABSENT",
+                    internal_pattern="5/9/13/17/21-move impulse",
+                    internal_count=internal_count,
+                )
             subtype = "W5_TRUNCATED" if truncated else "W5_NORMAL"
             macd_state = "W3/W5 DIVERGENCE PASS" if divergence else "W3/W5 DIVERGENCE ABSENT"
             time_ratio = _duration_ratio(p4, p5, p0, p1)
@@ -1477,6 +1566,22 @@ def _duration_ratio(
     duration = max(1, end.position - start.position)
     reference = max(1, reference_end.position - reference_start.position)
     return duration / reference
+
+
+def _matches_time_window(
+    observed: int | float,
+    references: tuple[int | float, ...],
+    multipliers: tuple[float, ...],
+    tolerance_bars: int,
+) -> bool:
+    targets = tuple(float(reference) * multiplier for reference in references for multiplier in multipliers)
+    return _matches_absolute_time_targets(observed, targets, tolerance_bars)
+
+
+def _matches_absolute_time_targets(
+    observed: int | float, targets: tuple[float, ...], tolerance_bars: int
+) -> bool:
+    return any(abs(float(observed) - target) <= tolerance_bars for target in targets)
 
 
 def _w2_minimum(cfg: ElliottWaveConfig) -> float:

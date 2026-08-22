@@ -64,7 +64,7 @@ wave5MinExtension = input.float(127.0, "Wave 5 minimum % of Wave 3-4", minval=1.
 wave5MaxExtension = input.float(261.8, "Wave 5 maximum % of Wave 3-4", minval=1.0, step=0.1, group=groupRules) / 100.0
 wave5DivergenceMode = input.string("Support", "Wave 5 divergence rule", options=["Support", "Required", "Off"], group=groupRules)
 timeRuleMode = input.string("Diagnostic all sources", "Time rule source", options=["Diagnostic all sources", "Chartking", "Hardik", "Separate Time Analysis"], group=groupRules)
-hpSignalMode = input.string("Disabled until project filters", "HP signal mode", options=["Disabled until project filters", "Structure confirmation only"], group=groupRules)
+hpSignalMode = input.string("Structure confirmation only", "HP signal mode", options=["Structure confirmation only", "Disabled"], group=groupRules)
 timeToleranceBars = input.int(8, "Time rule tolerance (closed bars)", minval=0, group=groupRules)
 // Legacy display diagnostics below use a normalized tolerance only for color.
 // V4 confirmation gates use the fixed closed-bar tolerance above.
@@ -407,6 +407,24 @@ f_duration_ratio(startIndex, endIndex, referenceStartIndex, referenceEndIndex) =
     duration = math.max(1, array.get(swingBars, endIndex) - array.get(swingBars, startIndex))
     reference = math.max(1, array.get(swingBars, referenceEndIndex) - array.get(swingBars, referenceStartIndex))
     duration / reference
+
+f_near_duration(observed, target) =>
+    math.abs(observed - target) <= timeToleranceBars
+
+f_w2_time_pass(w1Duration, w2Duration) =>
+    f_near_duration(w2Duration, 0.25 * w1Duration) or f_near_duration(w2Duration, 0.50 * w1Duration) or f_near_duration(w2Duration, w1Duration) or f_near_duration(w2Duration, 2.0 * w1Duration)
+
+f_w3_time_pass(w1Duration, w2Duration, w3Duration) =>
+    combined = w1Duration + w2Duration
+    f_near_duration(w3Duration, 0.50 * combined) or f_near_duration(w3Duration, combined)
+
+f_w4_time_pass(w2Duration, w3Duration, w4Duration) =>
+    combined = w2Duration + w3Duration
+    f_near_duration(w4Duration, 0.50 * w2Duration) or f_near_duration(w4Duration, 2.0 * w2Duration) or f_near_duration(w4Duration, 3.0 * w2Duration) or f_near_duration(w4Duration, 5.0 * w2Duration) or f_near_duration(w4Duration, 0.25 * combined) or f_near_duration(w4Duration, 0.50 * combined) or f_near_duration(w4Duration, combined)
+
+f_w5_time_pass(w1Duration, w3Duration, w4Duration, w5Duration) =>
+    combined13 = w1Duration + w3Duration
+    f_near_duration(w5Duration, w1Duration) or f_near_duration(w5Duration, w4Duration) or f_near_duration(w5Duration, 0.25 * combined13) or f_near_duration(w5Duration, 0.50 * combined13) or f_near_duration(w5Duration, combined13) or f_near_duration(w5Duration, 0.50 * (w3Duration + w4Duration))
 
 f_internal_four_overlaps_one(startIndex, endIndex, bullish) =>
     overlaps = false
@@ -1026,6 +1044,9 @@ if changed
                         retraceDenominator = math.abs(lockedW1Price - lockedBasePrice)
                         retrace = lockedBullish ? f_ratio(lockedW1Price - latestPrice, retraceDenominator) : f_ratio(latestPrice - lockedW1Price, retraceDenominator)
                         timeRatio = f_ratio(math.max(1, latestBar - lockedW1Bar), math.max(1, lockedW1Bar - lockedBaseBar))
+                        w1Duration = math.max(1, lockedW1Bar - lockedBaseBar)
+                        w2Duration = math.max(1, latestBar - lockedW1Bar)
+                        timePass = f_w2_time_pass(w1Duration, w2Duration)
                         correctSide = latestType == (lockedBullish ? -1 : 1)
                         microscopic = not na(retrace) and math.abs(retrace - microscopicRetrace) <= microscopicTolerance
                         normal = not na(retrace) and retrace >= f_w2_minimum() and retrace <= wave2MaxRetrace
@@ -1037,8 +1058,8 @@ if changed
                         currentInternalCount := internalCount
                         primaryPattern := correctionPrimary
                         alternatePattern := correctionAlternate
-                        hpSignalState := deep and correctionConfirmed ? (lockedBullish ? "HP BUY ELIGIBLE" : "HP SELL ELIGIBLE") + (hpSignalMode == "Disabled until project filters" ? " - PROJECT FILTERS TBD" : "") : ""
-                        if correctSide and correctionConfirmed and (normal or microscopic)
+                        hpSignalState := deep and correctionConfirmed and timePass and hpSignalMode != "Disabled" ? (lockedBullish ? "HP BUY ELIGIBLE" : "HP SELL ELIGIBLE") : ""
+                        if correctSide and correctionConfirmed and (normal or microscopic) and timePass
                             lockedW2Bar := latestBar
                             lockedW2Price := latestPrice
                             lockedW2Pattern := correctionPrimary
@@ -1053,8 +1074,8 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := "FORMING"
-                            lastReasonCode := correctionConfirmed ? "W2_RETRACE_OUTSIDE_NORMAL" : correctionReason
-                            currentNextCondition := "Need a complete Zig-Zag/Flat child and an approved W2 price context."
+                            lastReasonCode := correctionConfirmed and (normal or microscopic) and not timePass ? "W2_TIME_GATE_FAIL" : correctionConfirmed ? "W2_RETRACE_OUTSIDE_NORMAL" : correctionReason
+                            currentNextCondition := not timePass ? "Need a permitted 0.25/0.50/1.0/2.0 x W1 time window." : "Need a complete Zig-Zag/Flat child and an approved W2 price context."
                             developingText := correctSide ? "2?" : "raw"
                     else
                         candidateState := "FORMING"
@@ -1072,13 +1093,17 @@ if changed
                         trending = internalValid and not na(extension) and extension >= wave3MinExtension
                         terminal = internalValid and not na(extension) and extension >= wave3TerminalMin and extension < wave3MinExtension and terminalOverlap
                         maxPass = not na(extension) and extension <= f_w3_maximum()
+                        w1Duration = math.max(1, lockedW1Bar - lockedBaseBar)
+                        w2Duration = math.max(1, lockedW2Bar - lockedW1Bar)
+                        w3Duration = math.max(1, latestBar - lockedW2Bar)
+                        timePass = f_w3_time_pass(w1Duration, w2Duration, w3Duration)
                         currentFibAnchor := "P0-P1 projected from P2"
                         currentFibValue := extension
                         currentInternalPattern := "Impulse candidate " + str.tostring(internalCount) + " moves"
                         currentInternalCount := internalCount
                         currentMacdState := array.get(swingMacdExtreme, latestIndex) ? "W3 MOMENTUM SUPPORT" : "W3 MOMENTUM NOT EXTREME"
                         primaryPattern := "Motive"
-                        if (trending or terminal) and maxPass
+                        if (trending or terminal) and maxPass and timePass
                             lockedW3Bar := latestBar
                             lockedW3Price := latestPrice
                             lockedW3Subtype := (trending ? "W3_TRENDING" : "W3_TERMINAL") + (internalCount > 5 ? "_EXTENDED" : "")
@@ -1094,8 +1119,8 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := not maxPass and not na(extension) ? "INVALID" : "FORMING"
-                            lastReasonCode := not internalValid ? "W3_INTERNAL_FAIL" : not maxPass ? "W3_SOURCE_MAX_FAIL" : "W3_BELOW_TRENDING_MIN"
-                            currentNextCondition := "Need approved internal count plus trending >=161.8% or a valid terminal structure."
+                            lastReasonCode := not internalValid ? "W3_INTERNAL_FAIL" : not maxPass ? "W3_SOURCE_MAX_FAIL" : (trending or terminal) and not timePass ? "W3_TIME_GATE_FAIL" : "W3_BELOW_TRENDING_MIN"
+                            currentNextCondition := not timePass ? "Need a permitted (W1+W2)/2 or W1+W2 time window." : "Need approved internal count plus trending >=161.8% or a valid terminal structure."
                             developingText := correctSide ? "3?" : "raw"
                     else
                         candidateState := "FORMING"
@@ -1111,6 +1136,10 @@ if changed
                         w3Terminal = str.contains(lockedW3Subtype, "TERMINAL")
                         maxRetrace = w3Terminal ? wave4TerminalMaxRetrace : wave4MaxRetrace
                         pricePass = not na(retrace) and retrace >= f_w4_minimum() and retrace <= maxRetrace
+                        w2Duration = math.max(1, lockedW2Bar - lockedW1Bar)
+                        w3Duration = math.max(1, lockedW3Bar - lockedW2Bar)
+                        w4Duration = math.max(1, latestBar - lockedW3Bar)
+                        timePass = f_w4_time_pass(w2Duration, w3Duration, w4Duration)
                         overlap = lockedBullish ? latestPrice <= lockedW1Price : latestPrice >= lockedW1Price
                         overlapInvalid = overlap and not w3Terminal
                         currentFibAnchor := "Base-P3 retracement"
@@ -1125,7 +1154,7 @@ if changed
                             alternatePattern := "Terminal/diagonal candidate"
                             currentNextCondition := "Keep W4 container open or promote a valid terminal/diagonal alternate."
                             developingText := "4?"
-                        else if correctionConfirmed and correctSide and pricePass
+                        else if correctionConfirmed and correctSide and pricePass and timePass
                             lockedW4Bar := latestBar
                             lockedW4Price := latestPrice
                             lockedW4Pattern := correctionPrimary
@@ -1139,8 +1168,8 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := "FORMING"
-                            lastReasonCode := correctionConfirmed ? "W4_RETRACE_OUTSIDE_NORMAL" : correctionReason
-                            currentNextCondition := "Need a valid correction completion in the approved W4 range; W5 remains blocked."
+                            lastReasonCode := correctionConfirmed and pricePass and not timePass ? "W4_TIME_GATE_FAIL" : correctionConfirmed ? "W4_RETRACE_OUTSIDE_NORMAL" : correctionReason
+                            currentNextCondition := not timePass ? "Need a permitted W4 time window; W5 remains blocked." : "Need a valid correction completion in the approved W4 range; W5 remains blocked."
                             developingText := correctSide ? "4?" : "raw"
                     else
                         candidateState := "FORMING"
@@ -1164,13 +1193,18 @@ if changed
                         normal = not na(projection) and projection >= wave5MinExtension and projection <= wave5MaxExtension
                         doubleExtension = lockedInternalCount > 5 and lockedW3InternalCount > 5
                         truncated = doubleExtension and not na(projection) and projection <= 0.812
+                        w1Duration = math.max(1, lockedW1Bar - lockedBaseBar)
+                        w3Duration = math.max(1, lockedW3Bar - lockedW2Bar)
+                        w4Duration = math.max(1, lockedW4Bar - lockedW3Bar)
+                        w5Duration = math.max(1, latestBar - lockedW4Bar)
+                        timePass = f_w5_time_pass(w1Duration, w3Duration, w4Duration, w5Duration)
                         currentFibAnchor := "P3-P4 projection"
                         currentFibValue := projection
                         currentInternalPattern := "Impulse candidate " + str.tostring(internalCount) + " moves"
                         currentInternalCount := internalCount
                         currentMacdState := divergence ? "W3/W5 DIVERGENCE PASS" : "W3/W5 DIVERGENCE ABSENT"
                         primaryPattern := "Motive"
-                        if internalValid and not w3Shortest and divergencePass and (normal or truncated)
+                        if internalValid and not w3Shortest and divergencePass and (normal or truncated) and timePass
                             lockedW5Bar := latestBar
                             lockedW5Price := latestPrice
                             lockedW5Subtype := truncated ? "W5_TRUNCATED" : "W5_NORMAL"
@@ -1184,8 +1218,8 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := w3Shortest ? "INVALID" : "FORMING"
-                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? "W5_INTERNAL_FAIL" : "W5_PRICE_SUBTYPE_PENDING"
-                            currentNextCondition := "Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check."
+                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? "W5_INTERNAL_FAIL" : (normal or truncated) and not timePass ? "W5_TIME_GATE_FAIL" : "W5_PRICE_SUBTYPE_PENDING"
+                            currentNextCondition := not timePass ? "Need a permitted V4 Wave 5 time window." : "Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check."
                             developingText := correctSide ? "5?" : "raw"
                     else
                         candidateState := "FORMING"

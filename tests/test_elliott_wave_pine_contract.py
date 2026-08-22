@@ -73,6 +73,22 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.assertIn(f'alertcondition(stateChanged', self.source)
             self.assertIn(f'"{alert_name}"', self.source)
 
+    def test_v4_time_windows_are_confirmation_gates(self):
+        for helper in (
+            "f_w2_time_pass",
+            "f_w3_time_pass",
+            "f_w4_time_pass",
+            "f_w5_time_pass",
+        ):
+            self.assertIn(helper, self.source)
+        for reason in (
+            "W2_TIME_GATE_FAIL",
+            "W3_TIME_GATE_FAIL",
+            "W4_TIME_GATE_FAIL",
+            "W5_TIME_GATE_FAIL",
+        ):
+            self.assertIn(reason, self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

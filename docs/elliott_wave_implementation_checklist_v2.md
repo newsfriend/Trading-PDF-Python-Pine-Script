@@ -3,7 +3,7 @@
 This checklist maps the client-provided developer specification to the current
 code. The reference documents describe requirements; they are not executable
 project instructions. `DONE` means the stated scope exists in both Pine and
-Python unless a note says otherwise. `PARTIAL`, `TBD`, and `TBD-BLOCKED` remain
+Python unless a note says otherwise. `PARTIAL` and `TBD` remain
 visible so a plausible chart is never presented as a complete Elliott Wave
 engine.
 
@@ -35,11 +35,11 @@ The older manuals and chart images remain supporting references.
 
 | Requirement | Status | Evidence / remaining scope |
 | --- | --- | --- |
-| Wave 2 correction container | PARTIAL | Simple Zig-Zag and Flat children, 23.6%-81.2% normal context, separate 14% microscopic clue, timing diagnostic, deep-retrace HP eligibility, and Point-0 invalidation are implemented. W-X-Y and advanced correction subtypes remain pending. |
-| Structure-specific B-wave rules | DONE for simple ABC | Zig-Zag B uses 1%-50%; Flat B uses 61.8%-111%. The Flat interval is not applied universally. |
-| Wave 3 trending/terminal classifier | PARTIAL | 5/9/13/17/21 internals, >=161.8% trending, 61.8%-161.8% terminal-with-overlap, 2100%/2700% source presets, and momentum evidence are implemented. Full diagonal and channel classification remain pending. |
-| Wave 4 correction container and W5 gate | PARTIAL | Simple correction completion, Base-to-W3 retracement, normal/terminal maximums, subtype-aware overlap, and the no-premature-W5 gate are implemented. Complex corrections, channeling, and full time scoring remain pending. |
-| Wave 5 normal/truncated classifier | PARTIAL | 127%-261.8% normal projection, double-extension truncated context, W3-not-shortest, and optional/required divergence are implemented. Extended and ending-diagonal Wave 5 paths remain blocked as `TBD_BLOCKED`. |
+| Wave 2 correction container | PARTIAL | Simple Zig-Zag and Flat children, 23.6%-81.2% normal context, separate 14% microscopic clue, mandatory V4 time gate, deep-retrace HP eligibility, and Point-0 invalidation are implemented. W-X-Y and advanced correction subtypes remain pending. |
+| Structure-specific B-wave rules | DONE for simple ABC | Zig-Zag B uses the V4 continuous 1%-61.8% range; Flat B uses 61.8%-111%. The Flat interval is not applied universally. |
+| Wave 3 trending/terminal classifier | PARTIAL | 5/9/13/17/21 internals, >=161.8% trending, 61.8%-161.8% terminal-with-overlap, 2700% V4 maximum, mandatory time gate, and momentum evidence are implemented. Full diagonal and channel classification remain pending. |
+| Wave 4 correction container and W5 gate | PARTIAL | Simple correction completion, Base-to-W3 retracement, normal/terminal maximums, subtype-aware overlap, mandatory V4 time gate, and the no-premature-W5 gate are implemented. Complex corrections and channeling remain pending. |
+| Wave 5 normal/truncated classifier | PARTIAL | 127%-261.8% normal projection, mandatory V4 time gate, double-extension truncated context, W3-not-shortest, and optional/required divergence are implemented. Extended and ending-diagonal candidates remain FORMING until their classifiers are added. |
 | Persistent confirmed labels 0-5 | DONE for supported core paths | Pine and Python lock each main wave only after its parent-state rules pass; later raw pivots remain developing candidates. |
 | Phase 2 regression cases T02-T13 | DONE in Python | Tests cover normal/microscopic W2, Flat B at/above 111%, trending/terminal/extended W3, W4 completion/overlap gating, and normal/truncated W5. Pine has matching static contract tests; TradingView compilation is still required. |
 
@@ -52,18 +52,17 @@ The older manuals and chart images remain supporting references.
 | W-X-Y and W-X-Y-XX-Z classifiers | TBD | Connector rules, alternation, termination, and source-preset decisions. |
 | Six triangle variants | TBD | Contracting, expanding, barrier, running, and reverse variants with A-B-C-D-E validation. |
 | Leading and ending diagonal classifiers | TBD | Overlap, converging/diverging trend lines, and internal 3/5-wave rules. |
-| Channel, time, momentum, HP and FBD support engines | PARTIAL | Momentum diagnostics and HP eligibility exist. They do not mutate the count; full project filters and scoring are pending. |
+| Channel, time, momentum, HP and FBD support engines | PARTIAL | Mandatory V4 Wave 2-5 time gates and structure-confirmed HP eligibility exist in both engines. Full channels, targets, FBD and confidence scoring remain pending. |
 | Automatic larger correction after Wave 5 | PARTIAL | Both engines now transition into `LARGER_CORRECTION_CONTAINER` and lock actual A-B-C pivots for complete Zig-Zag/Flat paths. W-X-Y, triples and triangles remain pending. |
-| Double-confirmation outcome | TBD-BLOCKED | Conflicting source interpretations require an owner decision. |
+| Double-confirmation outcome | TBD | V4 resolves the rule; the 0-X break / 38.2% post-Y confirmation implementation remains pending. |
 | Pine/Python candle-for-candle parity | PARTIAL | State semantics/settings are aligned; identical exported market data still needs comparison. |
 | Backtesting acceptance | TBD | Requires completed classifiers, deterministic signal policy, datasets, and client-approved expected counts. |
 | TradingView compile and performance evidence | PARTIAL | Local tests validate source contracts; final Pine v6 compilation and chart performance must be checked in TradingView. |
 
-## Source Conflicts Kept Explicit
+## V4 Conflict Resolution Migration
 
-The V3.1 specification preserves several source conflicts. The implementation
-uses named configuration modes or reports a blocked subtype instead of silently
-choosing one interpretation:
+V4.0 resolves the earlier source conflicts. Remaining compatibility inputs are
+being retired as the locked V4 rules replace older selectable interpretations:
 
 - Chartking 23.6% versus Hardik/legacy 14% Wave 2 minimum treatment;
 - Chartking 2700% versus impulse-source 2100% Wave 3 maximum;

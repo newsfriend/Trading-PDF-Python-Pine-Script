@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 import pandas as pd
 
@@ -129,6 +130,22 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(state["active"]["waves"]["2"]["internal_pattern"], "5-3-5")
         self.assertGreaterEqual(state["active"]["waves"]["2"]["fib_value"], 0.236)
         self.assertLessEqual(state["active"]["waves"]["2"]["fib_value"], 0.812)
+
+    def test_v4_w2_time_gate_blocks_price_only_confirmation(self):
+        swings = _through_w2()
+        delayed = swings[-1]
+        swings[-1] = replace(
+            delayed,
+            position=40,
+            confirmed_position=41,
+            index=pd.Timestamp("2025-02-10"),
+            confirmed_index=pd.Timestamp("2025-02-11"),
+        )
+        state = _run_candidate_state(swings, self.config)
+
+        self.assertEqual(state["active"]["parent_state"], "W2_CORRECTION_CONTAINER")
+        self.assertNotIn("2", state["active"]["waves"])
+        self.assertEqual(state["last_reason_code"], "W2_TIME_GATE_FAIL")
 
     def test_t03_microscopic_w2_is_a_separate_subtype(self):
         swings = _confirmed_wave1()
