@@ -8,6 +8,8 @@ from python.elliott_wave_notes import (
     _Swing,
     compute_elliott_waves,
     _run_candidate_state,
+    _evaluate_correction,
+    _evaluate_triangle_correction,
     _with_indicators,
 )
 
@@ -106,6 +108,28 @@ def _through_larger_abc():
     _append_prices(swings, [160, 168, 150, 158, 140])  # A: 5 moves
     _append_prices(swings, [150, 145, 157.5])  # B: 3 moves, 50% of A
     _append_prices(swings, [145, 150, 130, 138, 115])  # C: 5 moves
+    return swings
+
+
+def _contracting_triangle_from(starting_swings):
+    swings = list(starting_swings)
+    _append_prices(swings, [125, 135, 95])
+    _append_prices(swings, [110, 100, 130])
+    _append_prices(swings, [115, 125, 105])
+    _append_prices(swings, [115, 110, 123])
+    _append_prices(swings, [112, 118, 108])
+    return swings
+
+
+def _triangle_from_endpoints(endpoints):
+    swings = [_swing(0, 100, 1)]
+    for target in endpoints:
+        current = swings[-1].price
+        if swings[-1].kind == 1:
+            fillers = [(current + target) / 2.0, max(current, target) + 1.0, target]
+        else:
+            fillers = [(current + target) / 2.0, min(current, target) - 1.0, target]
+        _append_prices(swings, fillers)
     return swings
 
 
@@ -312,6 +336,52 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(list(state["active"]["waves"]), ["0", "1", "2", "3", "4", "5", "A", "B", "C"])
         self.assertEqual(state["active"]["waves"]["C"]["reason_code"], "C_CONFIRMED")
         self.assertEqual(state["last_reason_code"], "CORRECTION_COMPLETE")
+
+    def test_v4_horizontal_contracting_triangle_uses_five_corrective_legs(self):
+        swings = _contracting_triangle_from(_through_w3())
+        start_idx = len(_through_w3()) - 1
+        triangle = _evaluate_triangle_correction(swings, start_idx, len(swings) - 1)
+
+        self.assertTrue(triangle["confirmed"])
+        self.assertEqual(triangle["subtype"], "HORIZONTAL_CONTRACTING")
+        self.assertEqual(triangle["labels"], ("A", "B", "C", "D", "E"))
+        self.assertEqual(triangle["internal_pattern"], "3-3-3-3-3")
+        self.assertGreater(triangle["thrust_max"], triangle["thrust_min"])
+
+    def test_v4_completed_triangle_confirms_wave4_before_wave5(self):
+        state = _run_candidate_state(
+            _contracting_triangle_from(_through_w3()), self.config
+        )
+
+        self.assertEqual(state["active"]["parent_state"], "W5_FORMING")
+        self.assertEqual(state["active"]["waves"]["4"]["pattern"], "Triangle")
+        self.assertEqual(
+            state["active"]["waves"]["4"]["subtype"],
+            "W4_HORIZONTAL_CONTRACTING",
+        )
+
+    def test_v4_all_six_triangle_size_and_boundary_families(self):
+        fixtures = {
+            "HORIZONTAL_CONTRACTING": [50, 85, 60, 78, 65],
+            "IRREGULAR_CONTRACTING": [70, 120, 85, 110, 92],
+            "RUNNING_CONTRACTING": [70, 120, 85, 125, 95],
+            "HORIZONTAL_EXPANDING": [90, 105, 85, 110, 80],
+            "IRREGULAR_EXPANDING": [80, 90, 70, 100, 60],
+            "RUNNING_EXPANDING": [80, 110, 85, 120, 75],
+        }
+        for expected, endpoints in fixtures.items():
+            with self.subTest(expected=expected):
+                swings = _triangle_from_endpoints(endpoints)
+                triangle = _evaluate_triangle_correction(swings, 0, len(swings) - 1)
+                self.assertTrue(triangle["confirmed"])
+                self.assertEqual(triangle["subtype"], expected)
+
+    def test_v4_triangle_is_never_considered_for_wave2(self):
+        swings = _contracting_triangle_from(_confirmed_wave1())
+        start_idx = len(_confirmed_wave1()) - 1
+        correction = _evaluate_correction(swings, start_idx, len(swings) - 1, self.config)
+
+        self.assertNotEqual(correction["primary"], "Triangle")
 
     def test_t13_truncated_w5_uses_double_extension_context(self):
         swings = [_swing(0, 0, -1, important=True, macd_extreme=True)]

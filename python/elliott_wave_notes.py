@@ -530,7 +530,7 @@ def _compute_candidate_state(
         for fib_ratio, fib_name in _FIB_LEVELS:
             common[f"ew_anchor_fib_{fib_name}"] = _anchor_fib_price(base, fib_ratio)
 
-        phase_by_label = {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "A": 6, "B": 7, "C": 8}
+        phase_by_label = {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "A": 6, "B": 7, "C": 8, "D": 9, "E": 10}
         for label, wave in active["waves"].items():
             phase = phase_by_label[label]
             swing = swings[int(wave["swing_idx"])]
@@ -914,7 +914,7 @@ def _advance_impulse_state(
 
     if state == "W2_CORRECTION_CONTAINER":
         start_idx = int(waves["1"]["swing_idx"])
-        correction = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
+        correction = _evaluate_correction(swings, start_idx, end_idx, cfg)
         p0 = swings[int(waves["0"]["swing_idx"])]
         p1 = swings[start_idx]
         p2 = swings[end_idx]
@@ -1117,8 +1117,8 @@ def _advance_impulse_state(
         p1 = swings[int(waves["1"]["swing_idx"])]
         p3 = swings[int(waves["3"]["swing_idx"])]
         p4 = swings[end_idx]
-        correction = _evaluate_simple_correction(
-            swings, int(waves["3"]["swing_idx"]), end_idx, cfg
+        correction = _evaluate_correction(
+            swings, int(waves["3"]["swing_idx"]), end_idx, cfg, allow_triangle=True
         )
         correct_side = p4.kind == (-1 if bullish else 1)
         retrace = _safe_ratio(abs(p3.price - p4.price), abs(p3.price - p0.price))
@@ -1177,15 +1177,25 @@ def _advance_impulse_state(
                     internal_pattern=str(correction["internal_pattern"]),
                     internal_count=int(correction["internal_count"]),
                 )
+            w4_subtype = (
+                f"W4_{correction['subtype']}"
+                if correction["primary"] == "Triangle"
+                else "W4_NORMAL" if not w3_terminal else "W4_TERMINAL_CONTEXT"
+            )
             record = _make_wave_record(
                 swing_idx=end_idx,
                 pattern=str(correction["primary"]),
-                subtype="W4_NORMAL" if not w3_terminal else "W4_TERMINAL_CONTEXT",
+                subtype=w4_subtype,
                 reason_code="W4_CONFIRMED",
-                source_rule_id="V3-P26-W4",
+                source_rule_id="V4-C20-C21-W4",
                 note=(
                     f"Wave 4 {correction['primary']} completed; Base-P3 retracement={retrace:.2%}; "
-                    f"W2/W4 similarity difference={similarity:.2%}."
+                    f"W2/W4 similarity difference={similarity:.2%}. "
+                    + (
+                        f"Triangle thrust={correction['thrust_min']:.4g}-{correction['thrust_max']:.4g}."
+                        if correction["primary"] == "Triangle"
+                        else ""
+                    )
                 ),
                 fib_anchor="Base-P3 retracement",
                 fib_value=retrace,
@@ -1205,7 +1215,7 @@ def _advance_impulse_state(
                 reason_code="W4_CONFIRMED",
                 note=str(record["note"]),
                 next_condition=active["next_condition"],
-                source_rule_id="V3-P26-W4",
+                source_rule_id="V4-C20-C21-W4",
                 alternate_pattern=str(correction["alternate"]),
                 fib_anchor="Base-P3 retracement",
                 fib_value=retrace,
@@ -1342,12 +1352,15 @@ def _advance_impulse_state(
 
     if state == "LARGER_CORRECTION_CONTAINER":
         start_idx = int(waves["5"]["swing_idx"])
-        correction = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
+        correction = _evaluate_correction(
+            swings, start_idx, end_idx, cfg, allow_triangle=True
+        )
         terminal = swings[end_idx]
         correct_side = terminal.kind == (-1 if bullish else 1)
         if correction["confirmed"] and correct_side:
             endpoint_indices = correction["endpoint_indices"]
-            for label, endpoint_idx in zip(("A", "B", "C"), endpoint_indices):
+            terminal_labels = correction["labels"]
+            for label, endpoint_idx in zip(terminal_labels, endpoint_indices):
                 endpoint = swings[int(endpoint_idx)]
                 waves[label] = _make_wave_record(
                     swing_idx=int(endpoint_idx),
@@ -1368,11 +1381,12 @@ def _advance_impulse_state(
                         else np.nan
                     ),
                     internal_pattern=str(correction["internal_pattern"]),
-                    internal_count=int(correction[f"{label.lower()}_count"]),
+                    internal_count=int(correction["leg_counts"][label]),
                     alternate=str(correction["alternate"]),
                 )
             active["parent_state"] = "CORRECTION_CONFIRMED"
-            active["next_condition"] = "The 1-2-3-4-5 then A-B-C cycle is complete; wait for the next qualified Point 0."
+            terminal_sequence = "-".join(terminal_labels)
+            active["next_condition"] = f"The 1-2-3-4-5 then {terminal_sequence} cycle is complete; wait for the next qualified Point 0."
             return _transition(
                 status="CONFIRMED",
                 candidate_label="C",
@@ -1381,7 +1395,7 @@ def _advance_impulse_state(
                 reason_code="CORRECTION_COMPLETE",
                 note=(
                     f"Larger {correction['primary']} completed as "
-                    f"{correction['internal_pattern']}; A-B-C labels locked on actual pivots."
+                    f"{correction['internal_pattern']}; {terminal_sequence} labels locked on actual pivots."
                 ),
                 next_condition=active["next_condition"],
                 source_rule_id="V4-C10-C16-LARGER-CORRECTION",
@@ -1420,6 +1434,131 @@ def _advance_impulse_state(
         next_condition="Wait for the next independently qualified Point 0 candidate.",
         source_rule_id="V4-MARKET-CYCLE",
     )
+
+
+def _evaluate_correction(
+    swings: list[_Swing],
+    start_idx: int,
+    end_idx: int,
+    cfg: ElliottWaveConfig,
+    *,
+    allow_triangle: bool = False,
+) -> dict[str, object]:
+    """Run permitted correction families in parallel and rank hard-valid results."""
+
+    simple = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
+    if allow_triangle:
+        triangle = _evaluate_triangle_correction(swings, start_idx, end_idx)
+        if triangle["confirmed"]:
+            if simple["confirmed"]:
+                triangle["alternate"] = str(simple["primary"])
+            return triangle
+        if not simple["confirmed"]:
+            simple["alternate"] = "Triangle"
+            simple["note"] = f"{simple['note']} Triangle candidates: {triangle['note']}"
+    return simple
+
+
+def _evaluate_triangle_correction(
+    swings: list[_Swing], start_idx: int, end_idx: int
+) -> dict[str, object]:
+    """Evaluate six V4 triangle families using five corrective legs and geometry."""
+
+    correction_counts = (3, 7, 11)
+    for a_count in correction_counts:
+        for b_count in correction_counts:
+            for c_count in correction_counts:
+                for d_count in correction_counts:
+                    for e_count in correction_counts:
+                        counts = (a_count, b_count, c_count, d_count, e_count)
+                        if start_idx + sum(counts) != end_idx:
+                            continue
+                        endpoints: list[int] = []
+                        cursor = start_idx
+                        for count in counts:
+                            cursor += count
+                            endpoints.append(cursor)
+                        points = [swings[start_idx], *(swings[index] for index in endpoints)]
+                        lengths = tuple(
+                            abs(points[index + 1].price - points[index].price)
+                            for index in range(5)
+                        )
+                        if min(lengths) <= 0:
+                            continue
+                        retrace_passes = sum(
+                            lengths[index] / lengths[index - 1] >= 0.50
+                            for index in range(1, 5)
+                        )
+                        if retrace_passes < 3:
+                            continue
+                        a, b, c, d, e = lengths
+                        pa, pb, pc, pd, pe = points[1:]
+                        ac_slope = (pc.price - pa.price) / max(1, pc.position - pa.position)
+                        bd_slope = (pd.price - pb.price) / max(1, pd.position - pb.position)
+                        opposite_boundaries = ac_slope * bd_slope < 0
+                        same_direction_boundaries = ac_slope * bd_slope > 0
+
+                        subtype = ""
+                        family = ""
+                        if a > b > c > d > e and opposite_boundaries:
+                            subtype, family = "HORIZONTAL_CONTRACTING", "contracting"
+                        elif b > a and b > c > d > e and b <= 2.618 * a and opposite_boundaries:
+                            subtype, family = "IRREGULAR_CONTRACTING", "contracting"
+                        elif b > a and b > c and d > c and e < d and b == max(lengths) and same_direction_boundaries:
+                            subtype, family = "RUNNING_CONTRACTING", "contracting"
+                        elif a == min(lengths) and a < b < c < d < e and opposite_boundaries:
+                            subtype, family = "HORIZONTAL_EXPANDING", "expanding"
+                        elif b == min(lengths) and c > b and d > c and e > d and e == max(lengths) and opposite_boundaries:
+                            subtype, family = "IRREGULAR_EXPANDING", "expanding"
+                        elif b > a and c < b and d > c and e > d and e == max(lengths) and same_direction_boundaries:
+                            subtype, family = "RUNNING_EXPANDING", "expanding"
+                        if not subtype:
+                            continue
+
+                        thrust_base = max(lengths) if family == "contracting" else e
+                        thrust_min = 0.75 * thrust_base if family == "contracting" else 0.618 * thrust_base
+                        thrust_max = 1.25 * thrust_base if family == "contracting" else thrust_base
+                        return {
+                            "confirmed": True,
+                            "primary": "Triangle",
+                            "alternate": "",
+                            "subtype": subtype,
+                            "b_ratio": _safe_ratio(b, a),
+                            "c_vs_a": _safe_ratio(c, a),
+                            "c_vs_b": _safe_ratio(c, b),
+                            "labels": ("A", "B", "C", "D", "E"),
+                            "leg_counts": dict(zip(("A", "B", "C", "D", "E"), counts)),
+                            "endpoint_indices": tuple(endpoints),
+                            "internal_pattern": "-".join(str(count) for count in counts),
+                            "internal_count": sum(counts),
+                            "reason_code": "TRIANGLE_CONFIRMED",
+                            "thrust_min": thrust_min,
+                            "thrust_max": thrust_max,
+                            "note": (
+                                f"{subtype} passes five corrective legs, size order, "
+                                f"three >=50% retracements and boundary geometry; "
+                                f"thrust={thrust_min:.4g}-{thrust_max:.4g}."
+                            ),
+                        }
+
+    return {
+        "confirmed": False,
+        "primary": "Triangle",
+        "alternate": "",
+        "subtype": "TRIANGLE_FORMING",
+        "b_ratio": np.nan,
+        "c_vs_a": np.nan,
+        "c_vs_b": np.nan,
+        "labels": ("A", "B", "C", "D", "E"),
+        "leg_counts": {},
+        "endpoint_indices": (),
+        "internal_pattern": "3/7/11 corrective legs",
+        "internal_count": max(0, end_idx - start_idx),
+        "reason_code": "TRIANGLE_GEOMETRY_PENDING",
+        "thrust_min": np.nan,
+        "thrust_max": np.nan,
+        "note": "Five-leg size sequence or boundary geometry is incomplete.",
+    }
 
 
 def _evaluate_simple_correction(
@@ -1494,6 +1633,7 @@ def _evaluate_simple_correction(
             "confirmed": True,
             "primary": primary["pattern"],
             "alternate": alternate,
+            "subtype": f"{str(primary['pattern']).upper().replace('-', '_')}_COMPLETE",
             "b_ratio": primary["b_ratio"],
             "c_vs_a": primary["c_vs_a"],
             "c_vs_b": primary["c_vs_b"],
@@ -1501,6 +1641,12 @@ def _evaluate_simple_correction(
             "b_count": primary["b_count"],
             "c_count": primary["c_count"],
             "endpoint_indices": primary["endpoint_indices"],
+            "labels": ("A", "B", "C"),
+            "leg_counts": {
+                "A": primary["a_count"],
+                "B": primary["b_count"],
+                "C": primary["c_count"],
+            },
             "internal_pattern": primary["internal_pattern"],
             "internal_count": end_idx - start_idx,
             "reason_code": "CORRECTION_CONFIRMED",
@@ -1520,6 +1666,7 @@ def _evaluate_simple_correction(
         "confirmed": False,
         "primary": "Zig-Zag / Flat",
         "alternate": "",
+        "subtype": "SIMPLE_CORRECTION_FORMING",
         "b_ratio": b_ratio,
         "c_vs_a": np.nan,
         "c_vs_b": np.nan,
@@ -1527,6 +1674,8 @@ def _evaluate_simple_correction(
         "b_count": 0,
         "c_count": 0,
         "endpoint_indices": (),
+        "labels": ("A", "B", "C"),
+        "leg_counts": {},
         "internal_pattern": "parallel candidates",
         "internal_count": max(0, end_idx - start_idx),
         "reason_code": reason,

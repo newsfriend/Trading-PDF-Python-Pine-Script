@@ -159,6 +159,10 @@ var int lockedBBar = na
 var float lockedBPrice = na
 var int lockedCBar = na
 var float lockedCPrice = na
+var int lockedDBar = na
+var float lockedDPrice = na
+var int lockedEBar = na
+var float lockedEPrice = na
 var string lockedCorrectionPattern = ""
 
 f_label_size() =>
@@ -402,6 +406,73 @@ f_eval_simple_correction(startIndex, endIndex) =>
             if not na(selectedBRatio) and selectedBRatio > flatBMaxRetrace
                 reason := "FLAT_B_GT_111"
     [confirmed, primary, alternate, selectedBRatio, internalPattern, math.max(0, endIndex - startIndex), reason, selectedACount, selectedBCount, selectedCCount]
+
+f_eval_triangle(startIndex, endIndex) =>
+    confirmed = false
+    subtype = "TRIANGLE_FORMING"
+    internalPattern = "3/7/11 corrective legs"
+    selectedA = 0
+    selectedB = 0
+    selectedC = 0
+    selectedD = 0
+    selectedE = 0
+    thrustMin = float(na)
+    thrustMax = float(na)
+    if startIndex >= 0 and endIndex > startIndex
+        for aOption = 0 to 2
+            aCount = f_correction_count_option(aOption)
+            for bOption = 0 to 2
+                bCount = f_correction_count_option(bOption)
+                for cOption = 0 to 2
+                    cCount = f_correction_count_option(cOption)
+                    for dOption = 0 to 2
+                        dCount = f_correction_count_option(dOption)
+                        for eOption = 0 to 2
+                            eCount = f_correction_count_option(eOption)
+                            if not confirmed and startIndex + aCount + bCount + cCount + dCount + eCount == endIndex
+                                aIndex = startIndex + aCount
+                                bIndex = aIndex + bCount
+                                cIndex = bIndex + cCount
+                                dIndex = cIndex + dCount
+                                eIndex = dIndex + eCount
+                                p0 = array.get(swingPrices, startIndex)
+                                pA = array.get(swingPrices, aIndex)
+                                pB = array.get(swingPrices, bIndex)
+                                pC = array.get(swingPrices, cIndex)
+                                pD = array.get(swingPrices, dIndex)
+                                pE = array.get(swingPrices, eIndex)
+                                aLen = math.abs(pA - p0)
+                                bLen = math.abs(pB - pA)
+                                cLen = math.abs(pC - pB)
+                                dLen = math.abs(pD - pC)
+                                eLen = math.abs(pE - pD)
+                                retracePasses = (bLen / aLen >= 0.50 ? 1 : 0) + (cLen / bLen >= 0.50 ? 1 : 0) + (dLen / cLen >= 0.50 ? 1 : 0) + (eLen / dLen >= 0.50 ? 1 : 0)
+                                acSlope = f_ratio(pC - pA, math.max(1, array.get(swingBars, cIndex) - array.get(swingBars, aIndex)))
+                                bdSlope = f_ratio(pD - pB, math.max(1, array.get(swingBars, dIndex) - array.get(swingBars, bIndex)))
+                                opposite = not na(acSlope) and not na(bdSlope) and acSlope * bdSlope < 0
+                                sameDirection = not na(acSlope) and not na(bdSlope) and acSlope * bdSlope > 0
+                                contractingHorizontal = aLen > bLen and bLen > cLen and cLen > dLen and dLen > eLen and opposite
+                                contractingIrregular = bLen > aLen and bLen > cLen and cLen > dLen and dLen > eLen and bLen <= 2.618 * aLen and opposite
+                                contractingRunning = bLen > aLen and bLen > cLen and dLen > cLen and eLen < dLen and bLen >= math.max(math.max(aLen, cLen), math.max(dLen, eLen)) and sameDirection
+                                expandingHorizontal = aLen <= math.min(math.min(bLen, cLen), math.min(dLen, eLen)) and aLen < bLen and bLen < cLen and cLen < dLen and dLen < eLen and opposite
+                                expandingIrregular = bLen <= math.min(math.min(aLen, cLen), math.min(dLen, eLen)) and cLen > bLen and dLen > cLen and eLen > dLen and eLen >= math.max(math.max(aLen, bLen), math.max(cLen, dLen)) and opposite
+                                expandingRunning = bLen > aLen and cLen < bLen and dLen > cLen and eLen > dLen and eLen >= math.max(math.max(aLen, bLen), math.max(cLen, dLen)) and sameDirection
+                                shapePass = retracePasses >= 3 and (contractingHorizontal or contractingIrregular or contractingRunning or expandingHorizontal or expandingIrregular or expandingRunning)
+                                if shapePass
+                                    confirmed := true
+                                    subtype := contractingHorizontal ? "HORIZONTAL_CONTRACTING" : contractingIrregular ? "IRREGULAR_CONTRACTING" : contractingRunning ? "RUNNING_CONTRACTING" : expandingHorizontal ? "HORIZONTAL_EXPANDING" : expandingIrregular ? "IRREGULAR_EXPANDING" : "RUNNING_EXPANDING"
+                                    contracting = contractingHorizontal or contractingIrregular or contractingRunning
+                                    widest = math.max(math.max(aLen, bLen), math.max(math.max(cLen, dLen), eLen))
+                                    thrustBase = contracting ? widest : eLen
+                                    thrustMin := (contracting ? 0.75 : 0.618) * thrustBase
+                                    thrustMax := (contracting ? 1.25 : 1.0) * thrustBase
+                                    internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount) + "-" + str.tostring(dCount) + "-" + str.tostring(eCount)
+                                    selectedA := aCount
+                                    selectedB := bCount
+                                    selectedC := cCount
+                                    selectedD := dCount
+                                    selectedE := eCount
+    [confirmed, subtype, internalPattern, math.max(0, endIndex - startIndex), selectedA, selectedB, selectedC, selectedD, selectedE, thrustMin, thrustMax]
 
 f_duration_ratio(startIndex, endIndex, referenceStartIndex, referenceEndIndex) =>
     duration = math.max(1, array.get(swingBars, endIndex) - array.get(swingBars, startIndex))
@@ -871,11 +942,23 @@ f_redraw_candidate() =>
             cLabel = label.new(lockedCBar, lockedCPrice, text="C", style=cStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | correction complete")
             array.push(drawnLines, cLine)
             array.push(drawnLabels, cLabel)
+        if not na(lockedDBar)
+            dLine = line.new(lockedCBar, lockedCPrice, lockedDBar, lockedDPrice, color=correctionLineColor, width=3)
+            dStyle = lockedBullish ? label.style_label_down : label.style_label_up
+            dLabel = label.new(lockedDBar, lockedDPrice, text="D", style=dStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed D pivot")
+            array.push(drawnLines, dLine)
+            array.push(drawnLabels, dLabel)
+        if not na(lockedEBar)
+            eLine = line.new(lockedDBar, lockedDPrice, lockedEBar, lockedEPrice, color=correctionLineColor, width=3)
+            eStyle = lockedBullish ? label.style_label_up : label.style_label_down
+            eLabel = label.new(lockedEBar, lockedEPrice, text="E", style=eStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | triangle complete")
+            array.push(drawnLines, eLine)
+            array.push(drawnLabels, eLabel)
         f_draw_locked_fib()
         if showDevelopingCandidates and str.length(developingText) > 0 and array.size(swingBars) > 0
             latestIndex = array.size(swingBars) - 1
             latestBar = array.get(swingBars, latestIndex)
-            lastLockedBar = not na(lockedCBar) ? lockedCBar : not na(lockedW5Bar) ? lockedW5Bar : not na(lockedW4Bar) ? lockedW4Bar : not na(lockedW3Bar) ? lockedW3Bar : not na(lockedW2Bar) ? lockedW2Bar : lockedW1Bar
+            lastLockedBar = not na(lockedEBar) ? lockedEBar : not na(lockedCBar) ? lockedCBar : not na(lockedW5Bar) ? lockedW5Bar : not na(lockedW4Bar) ? lockedW4Bar : not na(lockedW3Bar) ? lockedW3Bar : not na(lockedW2Bar) ? lockedW2Bar : lockedW1Bar
             if latestBar != lastLockedBar
                 latestPrice = array.get(swingPrices, latestIndex)
                 latestType = array.get(swingTypes, latestIndex)
@@ -1005,6 +1088,10 @@ if originBroken
     lockedBPrice := na
     lockedCBar := na
     lockedCPrice := na
+    lockedDBar := na
+    lockedDPrice := na
+    lockedEBar := na
+    lockedEPrice := na
     lockedCorrectionPattern := ""
     f_redraw_candidate()
 
@@ -1131,6 +1218,14 @@ if changed
                     w3Index = f_index_for_bar(lockedW3Bar)
                     if w3Index >= 0 and latestIndex > w3Index
                         [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w3Index, latestIndex)
+                        [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w3Index, latestIndex)
+                        if triangleConfirmed
+                            correctionConfirmed := true
+                            correctionAlternate := correctionPrimary
+                            correctionPrimary := "Triangle"
+                            internalPattern := trianglePattern
+                            internalCount := triangleCount
+                            correctionReason := "TRIANGLE_CONFIRMED"
                         retrace = f_ratio(math.abs(lockedW3Price - latestPrice), math.abs(lockedW3Price - lockedBasePrice))
                         correctSide = latestType == (lockedBullish ? -1 : 1)
                         w3Terminal = str.contains(lockedW3Subtype, "TERMINAL")
@@ -1148,6 +1243,9 @@ if changed
                         currentInternalCount := internalCount
                         primaryPattern := correctionPrimary
                         alternatePattern := correctionAlternate
+                        if triangleConfirmed
+                            currentFibAnchor := "Triangle E thrust"
+                            currentFibValue := triangleThrustMin
                         if correctionConfirmed and correctSide and overlapInvalid
                             candidateState := "INVALID"
                             lastReasonCode := "W4_NORMAL_OVERLAP"
@@ -1230,6 +1328,17 @@ if changed
                     w5Index = f_index_for_bar(lockedW5Bar)
                     if w5Index >= 0 and latestIndex > w5Index
                         [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w5Index, latestIndex)
+                        [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w5Index, latestIndex)
+                        if triangleConfirmed
+                            correctionConfirmed := true
+                            correctionAlternate := correctionPrimary
+                            correctionPrimary := "Triangle"
+                            internalPattern := trianglePattern
+                            internalCount := triangleCount
+                            correctionReason := "TRIANGLE_CONFIRMED"
+                            correctionACount := triangleACount
+                            correctionBCount := triangleBCount
+                            correctionCCount := triangleCCount
                         correctSide = latestType == (lockedBullish ? -1 : 1)
                         primaryPattern := correctionPrimary
                         alternatePattern := correctionAlternate
@@ -1246,6 +1355,15 @@ if changed
                             lockedBPrice := array.get(swingPrices, bIndex)
                             lockedCBar := latestBar
                             lockedCPrice := latestPrice
+                            if triangleConfirmed
+                                cIndex = bIndex + triangleCCount
+                                dIndex = cIndex + triangleDCount
+                                lockedCBar := array.get(swingBars, cIndex)
+                                lockedCPrice := array.get(swingPrices, cIndex)
+                                lockedDBar := array.get(swingBars, dIndex)
+                                lockedDPrice := array.get(swingPrices, dIndex)
+                                lockedEBar := latestBar
+                                lockedEPrice := latestPrice
                             lockedCorrectionPattern := correctionPrimary
                             engineStage := "CORRECTION_CONFIRMED"
                             candidateState := "CONFIRMED"

@@ -89,6 +89,20 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(reason, self.source)
 
+    def test_v4_six_triangle_families_are_classified(self):
+        self.assertIn("f_eval_triangle", self.source)
+        for subtype in (
+            "HORIZONTAL_CONTRACTING",
+            "IRREGULAR_CONTRACTING",
+            "RUNNING_CONTRACTING",
+            "HORIZONTAL_EXPANDING",
+            "IRREGULAR_EXPANDING",
+            "RUNNING_EXPANDING",
+        ):
+            self.assertIn(subtype, self.source)
+        self.assertIn('text="D"', self.source)
+        self.assertIn('text="E"', self.source)
+
 
 if __name__ == "__main__":
     unittest.main()
