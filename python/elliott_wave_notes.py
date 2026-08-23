@@ -684,18 +684,14 @@ def _run_candidate_state(
                             ),
                             "1": _make_wave_record(
                                 swing_idx=int(candidate["end_idx"]),
-                                pattern="Motive",
-                                subtype=(
-                                    "EXTENDED_W1"
-                                    if int(candidate["internal_count"]) > 5
-                                    else "NORMAL_W1"
-                                ),
+                                pattern=str(candidate["pattern"]),
+                                subtype=str(candidate["subtype"]),
                                 reason_code="W1_CONFIRMED",
                                 source_rule_id="V3-P24-W1",
                                 note=str(candidate["note"]),
                                 fib_anchor="Important H/L",
                                 fib_value=float(candidate["degree_progress"]),
-                                internal_pattern="5/9/13/17/21-move impulse",
+                                internal_pattern=str(candidate["internal_pattern"]),
                                 internal_count=int(candidate["internal_count"]),
                             ),
                         },
@@ -708,7 +704,7 @@ def _run_candidate_state(
                         "values": {
                             "ew_engine_state": "CONFIRMED",
                             "ew_candidate_label": "1",
-                            "ew_pattern": "Motive",
+                            "ew_pattern": candidate["pattern"],
                             "ew_subtype": active["waves"]["1"]["subtype"],
                             "ew_reason_code": last_reason_code,
                             "ew_rule_state": "ok",
@@ -1289,7 +1285,14 @@ def _advance_impulse_state(
         p5 = swings[end_idx]
         internal_count = end_idx - int(waves["4"]["swing_idx"])
         correct_side = p5.kind == (1 if bullish else -1)
-        internal_valid = internal_count in cfg.w1_internal_move_counts and correct_side
+        ending_diagonal = _evaluate_diagonal(
+            swings, int(waves["4"]["swing_idx"]), end_idx, "ending"
+        )
+        ending_confirmed = bool(ending_diagonal["confirmed"] and correct_side)
+        internal_valid = bool(
+            (internal_count in cfg.w1_internal_move_counts and correct_side)
+            or ending_confirmed
+        )
         ratio = _safe_ratio(abs(p5.price - p4.price), abs(p3.price - p4.price))
         w1_length = abs(p1.price - p0.price)
         w3_length = abs(p3.price - p2.price)
@@ -1300,14 +1303,19 @@ def _advance_impulse_state(
             if bullish
             else p5.price < p3.price and p5.macd_hist > p3.macd_hist
         )
-        divergence_pass = cfg.wave5_divergence_mode != "Required" or divergence
+        divergence_pass = (
+            bool(ending_diagonal.get("divergence", False))
+            if ending_confirmed
+            else cfg.wave5_divergence_mode != "Required" or divergence
+        )
         normal = cfg.wave5_min_extension <= ratio <= cfg.wave5_max_extension
         double_extension = (
             float(waves["1"]["internal_count"]) > 5
             and float(waves["3"]["internal_count"]) > 5
         )
         truncated = double_extension and ratio <= 0.812
-        if internal_valid and not w3_shortest and divergence_pass and (normal or truncated):
+        price_subtype_pass = normal or truncated or ending_confirmed
+        if internal_valid and not w3_shortest and divergence_pass and price_subtype_pass:
             w1_duration = p1.position - p0.position
             w3_duration = p3.position - p2.position
             w4_duration = p4.position - p3.position
@@ -1325,7 +1333,7 @@ def _advance_impulse_state(
             ):
                 return _transition(
                     candidate_label="5?",
-                    pattern="Motive",
+                    pattern="Ending Diagonal" if ending_confirmed else "Motive",
                     subtype="W5_TIME_PENDING",
                     reason_code="W5_TIME_GATE_FAIL",
                     note=f"Wave 5 structure passes but duration {w5_duration} misses the V4 time windows.",
@@ -1334,15 +1342,31 @@ def _advance_impulse_state(
                     fib_anchor="P3-P4 projection",
                     fib_value=ratio,
                     macd_state="W3/W5 DIVERGENCE PASS" if divergence else "W3/W5 DIVERGENCE ABSENT",
-                    internal_pattern="5/9/13/17/21-move impulse",
+                    internal_pattern=(
+                        str(ending_diagonal["internal_pattern"])
+                        if ending_confirmed
+                        else "5/9/13/17/21-move impulse"
+                    ),
                     internal_count=internal_count,
                 )
-            subtype = "W5_TRUNCATED" if truncated else "W5_NORMAL"
+            subtype = (
+                f"W5_{ending_diagonal['subtype']}"
+                if ending_confirmed
+                else "W5_TRUNCATED"
+                if truncated
+                else "W5_NORMAL"
+            )
+            pattern = "Ending Diagonal" if ending_confirmed else "Motive"
+            internal_pattern = (
+                str(ending_diagonal["internal_pattern"])
+                if ending_confirmed
+                else "5/9/13/17/21-move impulse"
+            )
             macd_state = "W3/W5 DIVERGENCE PASS" if divergence else "W3/W5 DIVERGENCE ABSENT"
             time_ratio = _duration_ratio(p4, p5, p0, p1)
             record = _make_wave_record(
                 swing_idx=end_idx,
-                pattern="Motive",
+                pattern=pattern,
                 subtype=subtype,
                 reason_code="W5_CONFIRMED",
                 source_rule_id="V3-P26-27-W5",
@@ -1351,7 +1375,7 @@ def _advance_impulse_state(
                 fib_value=ratio,
                 time_value=time_ratio,
                 macd_state=macd_state,
-                internal_pattern="5/9/13/17/21-move impulse",
+                internal_pattern=internal_pattern,
                 internal_count=internal_count,
             )
             waves["5"] = record
@@ -1360,7 +1384,7 @@ def _advance_impulse_state(
             return _transition(
                 status="CONFIRMED",
                 candidate_label="5",
-                pattern="Motive",
+                pattern=pattern,
                 subtype=subtype,
                 reason_code="W5_CONFIRMED",
                 note=str(record["note"]),
@@ -1370,7 +1394,7 @@ def _advance_impulse_state(
                 fib_value=ratio,
                 time_value=time_ratio,
                 macd_state=macd_state,
-                internal_pattern="5/9/13/17/21-move impulse",
+                internal_pattern=internal_pattern,
                 internal_count=internal_count,
             )
         reason = "W5_W3_SHORTEST" if w3_shortest else "W5_INTERNAL_FAIL" if not internal_valid else "W5_PRICE_SUBTYPE_PENDING"
@@ -2096,13 +2120,14 @@ def _evaluate_simple_correction(
 
     candidates: list[dict[str, object]] = []
     impulse_counts = cfg.w1_internal_move_counts
+    c_motive_counts = tuple(sorted(set((*impulse_counts, 15))))
     correction_counts = (3, 7, 11)
     saw_b_time_failure = False
     saw_c_time_failure = False
 
     for a_count in impulse_counts:
         for b_count in correction_counts:
-            for c_count in impulse_counts:
+            for c_count in c_motive_counts:
                 if start_idx + a_count + b_count + c_count != end_idx:
                     continue
                 candidate = _correction_ratios(
@@ -2115,11 +2140,34 @@ def _evaluate_simple_correction(
                 timing = _simple_correction_timing(
                     swings, start_idx, a_count, b_count, end_idx, cfg
                 )
+                a_diagonal = (
+                    _evaluate_diagonal(
+                        swings, start_idx, start_idx + a_count, "leading"
+                    )
+                    if a_count == 21
+                    else None
+                )
+                c_diagonal = (
+                    _evaluate_diagonal(
+                        swings,
+                        start_idx + a_count + b_count,
+                        end_idx,
+                        "ending",
+                    )
+                    if c_count == 15
+                    else None
+                )
+                c_structure_pass = c_count != 15 or bool(c_diagonal["confirmed"])
                 if price_pass and not timing["b_time_pass"]:
                     saw_b_time_failure = True
                 elif price_pass and not timing["c_time_pass"]:
                     saw_c_time_failure = True
-                if price_pass and timing["b_time_pass"] and timing["c_time_pass"]:
+                if (
+                    price_pass
+                    and c_structure_pass
+                    and timing["b_time_pass"]
+                    and timing["c_time_pass"]
+                ):
                     subtype = (
                         "ZIG_ZAG_NORMAL"
                         if candidate["c_vs_a"] <= 1.618
@@ -2131,6 +2179,14 @@ def _evaluate_simple_correction(
                             **timing,
                             "pattern": "Zig-Zag",
                             "subtype": subtype,
+                            "a_structure": (
+                                "LEADING_DIAGONAL"
+                                if a_diagonal and a_diagonal["confirmed"]
+                                else "IMPULSE"
+                            ),
+                            "c_structure": (
+                                "ENDING_DIAGONAL" if c_count == 15 else "IMPULSE"
+                            ),
                             "internal_pattern": f"{a_count}-{b_count}-{c_count}",
                             "a_count": a_count,
                             "b_count": b_count,
@@ -2145,7 +2201,7 @@ def _evaluate_simple_correction(
 
     for a_count in correction_counts:
         for b_count in correction_counts:
-            for c_count in impulse_counts:
+            for c_count in c_motive_counts:
                 if start_idx + a_count + b_count + c_count != end_idx:
                     continue
                 candidate = _correction_ratios(
@@ -2158,11 +2214,27 @@ def _evaluate_simple_correction(
                 timing = _simple_correction_timing(
                     swings, start_idx, a_count, b_count, end_idx, cfg
                 )
+                c_diagonal = (
+                    _evaluate_diagonal(
+                        swings,
+                        start_idx + a_count + b_count,
+                        end_idx,
+                        "ending",
+                    )
+                    if c_count == 15
+                    else None
+                )
+                c_structure_pass = c_count != 15 or bool(c_diagonal["confirmed"])
                 if price_pass and not timing["b_time_pass"]:
                     saw_b_time_failure = True
                 elif price_pass and not timing["c_time_pass"]:
                     saw_c_time_failure = True
-                if price_pass and timing["b_time_pass"] and timing["c_time_pass"]:
+                if (
+                    price_pass
+                    and c_structure_pass
+                    and timing["b_time_pass"]
+                    and timing["c_time_pass"]
+                ):
                     if candidate["b_ratio"] <= 0.812:
                         subtype = (
                             "FLAT_NORMAL"
@@ -2181,6 +2253,10 @@ def _evaluate_simple_correction(
                             **timing,
                             "pattern": "Flat",
                             "subtype": subtype,
+                            "a_structure": "CORRECTIVE",
+                            "c_structure": (
+                                "ENDING_DIAGONAL" if c_count == 15 else "IMPULSE"
+                            ),
                             "internal_pattern": f"{a_count}-{b_count}-{c_count}",
                             "a_count": a_count,
                             "b_count": b_count,
@@ -2222,9 +2298,12 @@ def _evaluate_simple_correction(
                 "B": primary["b_duration"],
                 "C": primary["c_duration"],
             },
+            "a_structure": primary["a_structure"],
+            "c_structure": primary["c_structure"],
             "note": (
                 f"{primary['subtype']} {primary['internal_pattern']} passes; "
                 f"B={primary['b_ratio']:.2%}, C/A={primary['c_vs_a']:.2%}; "
+                f"A={primary['a_structure']}, C={primary['c_structure']}; "
                 f"B/C time gates=PASS."
             ),
         }
@@ -2383,6 +2462,98 @@ def _internal_four_overlaps_one(
     )
 
 
+def _evaluate_diagonal(
+    swings: list[_Swing], start_idx: int, end_idx: int, kind: str
+) -> dict[str, object]:
+    """Classify a source-locked leading or ending diagonal container."""
+
+    if kind not in {"leading", "ending"}:
+        raise ValueError("kind must be 'leading' or 'ending'")
+    leg_counts = (5, 3, 5, 3, 5) if kind == "leading" else (3, 3, 3, 3, 3)
+    if end_idx - start_idx != sum(leg_counts):
+        return {"confirmed": False, "reason_code": "DIAGONAL_INTERNAL_FAIL"}
+
+    endpoints: list[int] = []
+    cursor = start_idx
+    for count in leg_counts:
+        cursor += count
+        endpoints.append(cursor)
+    p0, p1, p2, p3, p4, p5 = (
+        swings[index] for index in (start_idx, *endpoints)
+    )
+    bullish = p0.kind == -1 and p5.kind == 1 and p5.price > p0.price
+    bearish = p0.kind == 1 and p5.kind == -1 and p5.price < p0.price
+    if not (bullish or bearish):
+        return {"confirmed": False, "reason_code": "DIAGONAL_DIRECTION_FAIL"}
+
+    advances = (
+        p3.price > p1.price and p5.price > p3.price and p4.price > p2.price
+        if bullish
+        else p3.price < p1.price and p5.price < p3.price and p4.price < p2.price
+    )
+    overlap = p4.price <= p1.price if bullish else p4.price >= p1.price
+    wave2_boundary = p4.price > p2.price if bullish else p4.price < p2.price
+    early_width = abs(p1.price - p2.price)
+    late_width = abs(p3.price - p4.price)
+    wedge = advances and not np.isclose(early_width, late_width)
+    wedge_subtype = "CONTRACTING" if late_width < early_width else "EXPANDING"
+    divergence = (
+        p5.macd_hist < p3.macd_hist
+        if bullish
+        else p5.macd_hist > p3.macd_hist
+    )
+    w1_length = abs(p1.price - p0.price)
+    w3_ratio = _safe_ratio(abs(p3.price - p2.price), w1_length)
+    w4_retrace = _safe_ratio(abs(p3.price - p4.price), abs(p3.price - p0.price))
+    w5_ratio = _safe_ratio(abs(p5.price - p4.price), w1_length)
+    leading_fib_pass = bool(
+        np.isfinite(w3_ratio)
+        and 0.618 - 1e-9 <= w3_ratio < 1.618 - 1e-9
+        and np.isfinite(w4_retrace)
+        and 0.236 - 1e-9 <= w4_retrace <= 0.618 + 1e-9
+        and np.isfinite(w5_ratio)
+        and (
+            1.618 - 1e-9 <= w5_ratio <= 2.618 + 1e-9
+            or abs(w5_ratio - 1.0) <= 0.02
+        )
+    )
+    confirmed = bool(
+        overlap
+        and wave2_boundary
+        and wedge
+        and (leading_fib_pass if kind == "leading" else divergence)
+    )
+    reason = (
+        "DIAGONAL_CONFIRMED"
+        if confirmed
+        else "DIAGONAL_OVERLAP_FAIL"
+        if not overlap or not wave2_boundary
+        else "DIAGONAL_WEDGE_FAIL"
+        if not wedge
+        else "LEADING_DIAGONAL_FIB_FAIL"
+        if kind == "leading" and not leading_fib_pass
+        else "ENDING_DIAGONAL_DIVERGENCE_FAIL"
+    )
+    return {
+        "confirmed": confirmed,
+        "kind": kind.upper(),
+        "subtype": f"{kind.upper()}_DIAGONAL_{wedge_subtype}",
+        "reason_code": reason,
+        "leg_counts": leg_counts,
+        "endpoint_indices": tuple(endpoints),
+        "internal_pattern": "-".join(str(count) for count in leg_counts),
+        "bullish": bullish,
+        "overlap": overlap,
+        "wave2_boundary_pass": wave2_boundary,
+        "wedge": wedge,
+        "divergence": divergence,
+        "w3_ratio": w3_ratio,
+        "w4_retrace": w4_retrace,
+        "w5_ratio": w5_ratio,
+        "invalidation_price": p4.price,
+    }
+
+
 def _candidate_ending_at(
     swings: list[_Swing],
     processed_indices: list[int],
@@ -2426,6 +2597,20 @@ def _candidate_ending_at(
         ):
             continue
 
+        leading_diagonal = (
+            _evaluate_diagonal(swings, start_idx, end_idx, "leading")
+            if internal_count == 21
+            else None
+        )
+        subtype = (
+            str(leading_diagonal["subtype"])
+            if leading_diagonal and leading_diagonal["confirmed"]
+            else "EXTENDED_W1"
+            if internal_count > 5
+            else "NORMAL_W1"
+        )
+        pattern = "Leading Diagonal" if "LEADING_DIAGONAL" in subtype else "Motive"
+
         return {
             "start_idx": start_idx,
             "end_idx": end_idx,
@@ -2434,8 +2619,15 @@ def _candidate_ending_at(
             "base_position": start.position,
             "degree_progress": degree_progress,
             "internal_count": internal_count,
+            "pattern": pattern,
+            "subtype": subtype,
+            "internal_pattern": (
+                str(leading_diagonal["internal_pattern"])
+                if leading_diagonal and leading_diagonal["confirmed"]
+                else "5/9/13/17/21-move impulse"
+            ),
             "note": (
-                f"Wave 1 confirmed with {internal_count} internal moves and "
+                f"Wave 1 {subtype} confirmed with {internal_count} internal moves and "
                 f"{degree_progress:.2%} degree progress; {oscillator_note}."
             ),
         }

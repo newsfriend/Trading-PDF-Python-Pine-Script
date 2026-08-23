@@ -10,6 +10,7 @@ from python.elliott_wave_notes import (
     _run_candidate_state,
     _evaluate_correction,
     _evaluate_double_correction,
+    _evaluate_diagonal,
     _evaluate_simple_correction,
     _evaluate_triple_correction,
     _evaluate_triangle_correction,
@@ -374,6 +375,61 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
                 )
                 self.assertTrue(correction["confirmed"])
                 self.assertEqual(correction["subtype"], expected)
+
+    def test_v4_leading_diagonal_requires_53535_overlap_wedge_and_fibs(self):
+        prices = (
+            0, 3, 1, 6, 4, 10, 8, 9, 6, 10, 8,
+            13, 11, 18, 13, 15, 9, 14, 11, 20, 15, 25.18,
+        )
+        swings = [_swing(i, price, -1 if i % 2 == 0 else 1) for i, price in enumerate(prices)]
+        swings[0] = replace(swings[0], important_extreme=True, macd_extreme=True)
+        diagonal = _evaluate_diagonal(swings, 0, 21, "leading")
+        self.assertTrue(diagonal["confirmed"])
+        self.assertEqual(diagonal["internal_pattern"], "5-3-5-3-5")
+        self.assertEqual(diagonal["subtype"], "LEADING_DIAGONAL_EXPANDING")
+
+        crossed = list(swings)
+        crossed[16] = replace(crossed[16], price=5.0)
+        self.assertFalse(_evaluate_diagonal(crossed, 0, 21, "leading")["confirmed"])
+
+        state = _run_candidate_state(
+            swings,
+            replace(self.config, degree_retrace=0.20),
+        )
+        self.assertEqual(state["active"]["waves"]["1"]["pattern"], "Leading Diagonal")
+        self.assertEqual(
+            state["active"]["waves"]["1"]["subtype"],
+            "LEADING_DIAGONAL_EXPANDING",
+        )
+
+    def test_v4_ending_diagonal_confirms_only_in_wave5_or_c(self):
+        swings = _through_w4()
+        ending_prices = (
+            118, 114, 125, 121, 123, 118, 130, 124,
+            145, 135, 140, 122, 140, 130, 155,
+        )
+        _append_prices(swings, ending_prices, final_macd=2.0)
+        state = _run_candidate_state(swings, self.config)
+        wave5 = state["active"]["waves"]["5"]
+        self.assertEqual(wave5["pattern"], "Ending Diagonal")
+        self.assertEqual(wave5["internal_pattern"], "3-3-3-3-3")
+        self.assertIn("ENDING_DIAGONAL", wave5["subtype"])
+
+        correction = [_swing(0, 100, 1)]
+        _append_prices(correction, [94, 97, 90, 95, 80])
+        _append_prices(correction, [85, 83, 90])
+        _append_prices(
+            correction,
+            [84, 87, 80, 83, 81, 86, 80, 82, 74, 78, 76, 82, 76, 79, 70],
+            final_macd=-2.0,
+        )
+        correction[-7] = replace(correction[-7], macd_hist=-10.0)
+        result = _evaluate_simple_correction(
+            correction, 0, len(correction) - 1, self.config
+        )
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(result["c_structure"], "ENDING_DIAGONAL")
+        self.assertEqual(result["c_count"], 15)
 
     def test_t04_origin_break_invalidates_and_starts_controlled_recount(self):
         swings = _confirmed_wave1() + [_swing(6, -1, -1)]

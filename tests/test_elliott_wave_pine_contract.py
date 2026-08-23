@@ -157,6 +157,24 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertIn('reason := "TRIPLE_CONFIRMED"', self.source)
         self.assertIn('position == 3 ? "XX"', self.source)
 
+    def test_v4_leading_and_ending_diagonals_are_position_locked(self):
+        for token in (
+            "f_eval_diagonal",
+            'diagonalKind == "leading"',
+            '"5-3-5-3-5"',
+            '"3-3-3-3-3"',
+            '"LEADING_DIAGONAL_"',
+            '"ENDING_DIAGONAL_"',
+            "wave2BoundaryPass",
+            "leadingFibPass",
+            "endingDivergence",
+            'f_eval_diagonal(w4Index, latestIndex, "ending")',
+            'f_eval_diagonal(bIndex, endIndex, "ending")',
+        ):
+            self.assertIn(token, self.source)
+        self.assertNotIn('f_eval_diagonal(w2Index, latestIndex, "leading")', self.source)
+        self.assertNotIn('f_eval_diagonal(w3Index, latestIndex, "ending")', self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

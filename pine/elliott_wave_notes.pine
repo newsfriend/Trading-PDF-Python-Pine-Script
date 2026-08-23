@@ -120,6 +120,7 @@ var float lockedW1Price = na
 var int lockedAtBar = na
 var float lockedDegreeProgress = na
 var int lockedInternalCount = na
+var string lockedW1Subtype = ""
 var float lockedImportantHigh = na
 var float lockedImportantLow = na
 var int searchFloorBar = -1
@@ -275,12 +276,54 @@ f_candidate_crosses_origin(startIndex, endIndex, bullish) =>
                 crossed := true
     crossed
 
+f_eval_diagonal(startIndex, endIndex, diagonalKind) =>
+    leading = diagonalKind == "leading"
+    expectedCount = leading ? 21 : 15
+    confirmed = false
+    subtype = leading ? "LEADING_DIAGONAL_FORMING" : "ENDING_DIAGONAL_FORMING"
+    reason = "DIAGONAL_INTERNAL_FAIL"
+    divergence = false
+    internalPattern = leading ? "5-3-5-3-5" : "3-3-3-3-3"
+    if startIndex >= 0 and endIndex - startIndex == expectedCount
+        i1 = startIndex + (leading ? 5 : 3)
+        i2 = i1 + 3
+        i3 = i2 + (leading ? 5 : 3)
+        i4 = i3 + 3
+        i5 = i4 + (leading ? 5 : 3)
+        p0 = array.get(swingPrices, startIndex)
+        p1 = array.get(swingPrices, i1)
+        p2 = array.get(swingPrices, i2)
+        p3 = array.get(swingPrices, i3)
+        p4 = array.get(swingPrices, i4)
+        p5 = array.get(swingPrices, i5)
+        bullish = array.get(swingTypes, startIndex) == -1 and array.get(swingTypes, i5) == 1 and p5 > p0
+        bearish = array.get(swingTypes, startIndex) == 1 and array.get(swingTypes, i5) == -1 and p5 < p0
+        advances = bullish ? p3 > p1 and p5 > p3 and p4 > p2 : bearish ? p3 < p1 and p5 < p3 and p4 < p2 : false
+        overlap = bullish ? p4 <= p1 : bearish ? p4 >= p1 : false
+        wave2BoundaryPass = bullish ? p4 > p2 : bearish ? p4 < p2 : false
+        earlyWidth = math.abs(p1 - p2)
+        lateWidth = math.abs(p3 - p4)
+        wedge = advances and math.abs(earlyWidth - lateWidth) > 0.000000001
+        wedgeSubtype = lateWidth < earlyWidth ? "CONTRACTING" : "EXPANDING"
+        divergence := bullish ? array.get(swingMacdHist, i5) < array.get(swingMacdHist, i3) : bearish ? array.get(swingMacdHist, i5) > array.get(swingMacdHist, i3) : false
+        w1Length = math.abs(p1 - p0)
+        w3Ratio = w1Length > 0 ? math.abs(p3 - p2) / w1Length : na
+        baseTo3 = math.abs(p3 - p0)
+        w4Retrace = baseTo3 > 0 ? math.abs(p3 - p4) / baseTo3 : na
+        w5Ratio = w1Length > 0 ? math.abs(p5 - p4) / w1Length : na
+        leadingFibPass = not na(w3Ratio) and w3Ratio >= 0.618 and w3Ratio < 1.618 and not na(w4Retrace) and w4Retrace >= 0.236 and w4Retrace <= 0.618 and not na(w5Ratio) and ((w5Ratio >= 1.618 and w5Ratio <= 2.618) or math.abs(w5Ratio - 1.0) <= 0.02)
+        confirmed := overlap and wave2BoundaryPass and wedge and (leading ? leadingFibPass : divergence)
+        subtype := (leading ? "LEADING_DIAGONAL_" : "ENDING_DIAGONAL_") + wedgeSubtype
+        reason := confirmed ? "DIAGONAL_CONFIRMED" : not overlap or not wave2BoundaryPass ? "DIAGONAL_OVERLAP_FAIL" : not wedge ? "DIAGONAL_WEDGE_FAIL" : leading ? "LEADING_DIAGONAL_FIB_FAIL" : "ENDING_DIAGONAL_DIVERGENCE_FAIL"
+    [confirmed, subtype, reason, divergence, internalPattern]
+
 f_candidate_for_count(endIndex, internalCount) =>
     startIndex = endIndex - internalCount
     valid = false
     progress = float(na)
     bullish = false
     note = ""
+    candidateSubtype = internalCount > 5 ? "EXTENDED_W1" : "NORMAL_W1"
     if startIndex >= 0
         startBar = array.get(swingBars, startIndex)
         startPrice = array.get(swingPrices, startIndex)
@@ -302,8 +345,10 @@ f_candidate_for_count(endIndex, internalCount) =>
         originOk = not f_candidate_crosses_origin(startIndex, endIndex, bullish)
         floorOk = startBar >= searchFloorBar
         valid := (bullish or bearish) and directionOk and importantOk and degreeOk and atrOk and oscillatorOk and originOk and floorOk
-        note := "W1 " + str.tostring(internalCount) + " moves | degree " + str.tostring(progress * 100.0, "#.##") + "% | extreme " + (extremeOk ? "yes" : "no") + " | divergence " + (divergenceOk ? "yes" : "no")
-    [valid, startIndex, bullish, progress, note]
+        [leadingConfirmed, leadingSubtype, leadingReason, leadingDivergence, leadingPattern] = f_eval_diagonal(startIndex, endIndex, "leading")
+        candidateSubtype := leadingConfirmed ? leadingSubtype : candidateSubtype
+        note := "W1 " + candidateSubtype + " | " + str.tostring(internalCount) + " moves | degree " + str.tostring(progress * 100.0, "#.##") + "% | extreme " + (extremeOk ? "yes" : "no") + " | divergence " + (divergenceOk ? "yes" : "no")
+    [valid, startIndex, bullish, progress, candidateSubtype, note]
 
 f_find_phase1_candidate() =>
     endIndex = array.size(swingBars) - 1
@@ -311,24 +356,29 @@ f_find_phase1_candidate() =>
     foundBullish = false
     foundProgress = float(na)
     foundCount = -1
+    foundSubtype = ""
     foundNote = ""
     if endIndex >= 5
         for countIndex = 0 to 4
             internalCount = countIndex == 0 ? 5 : countIndex == 1 ? 9 : countIndex == 2 ? 13 : countIndex == 3 ? 17 : 21
-            [valid, startIndex, bullish, progress, note] = f_candidate_for_count(endIndex, internalCount)
+            [valid, startIndex, bullish, progress, candidateSubtype, note] = f_candidate_for_count(endIndex, internalCount)
             if foundStart == -1 and valid
                 foundStart := startIndex
                 foundBullish := bullish
                 foundProgress := progress
                 foundCount := internalCount
+                foundSubtype := candidateSubtype
                 foundNote := note
-    [foundStart, endIndex, foundBullish, foundProgress, foundCount, foundNote]
+    [foundStart, endIndex, foundBullish, foundProgress, foundCount, foundSubtype, foundNote]
 
 f_is_candidate_mode() =>
     engineMode != "Legacy fixed cycle"
 
 f_impulse_count(optionIndex) =>
     optionIndex == 0 ? 5 : optionIndex == 1 ? 9 : optionIndex == 2 ? 13 : optionIndex == 3 ? 17 : 21
+
+f_c_motive_count(optionIndex) =>
+    optionIndex == 0 ? 5 : optionIndex == 1 ? 9 : optionIndex == 2 ? 13 : optionIndex == 3 ? 15 : optionIndex == 4 ? 17 : 21
 
 f_correction_count_option(optionIndex) =>
     optionIndex == 0 ? 3 : optionIndex == 1 ? 7 : 11
@@ -375,8 +425,8 @@ f_eval_simple_correction(startIndex, endIndex) =>
             aCount = f_impulse_count(aOption)
             for bOption = 0 to 2
                 bCount = f_correction_count_option(bOption)
-                for cOption = 0 to 4
-                    cCount = f_impulse_count(cOption)
+                for cOption = 0 to 5
+                    cCount = f_c_motive_count(cOption)
                     if startIndex + aCount + bCount + cCount == endIndex
                         [bRatio, cVsA, cVsB] = f_correction_ratios(startIndex, aCount, bCount, cCount)
                         aIndex = startIndex + aCount
@@ -388,16 +438,19 @@ f_eval_simple_correction(startIndex, endIndex) =>
                         bTimePass = math.abs(bDuration - aDuration) <= timeToleranceBars or math.abs(bDuration - 2.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 5.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 10.0 * aDuration) <= timeToleranceBars
                         cTimePass = math.abs(cDuration - 0.25 * abDuration) <= timeToleranceBars or math.abs(cDuration - 0.50 * abDuration) <= timeToleranceBars or math.abs(cDuration - abDuration) <= timeToleranceBars
                         zigPricePass = not na(bRatio) and bRatio >= 0.01 and bRatio <= 0.618 and not na(cVsA) and cVsA >= 0.618 and cVsA <= 4.618
+                        [cDiagonalConfirmed, cDiagonalSubtype, cDiagonalReason, cDiagonalDivergence, cDiagonalPattern] = f_eval_diagonal(bIndex, endIndex, "ending")
+                        cStructurePass = cCount != 15 or cDiagonalConfirmed
                         sawBTimeFailure := sawBTimeFailure or (zigPricePass and not bTimePass)
                         sawCTimeFailure := sawCTimeFailure or (zigPricePass and bTimePass and not cTimePass)
-                        zigPass = zigPricePass and bTimePass and cTimePass
+                        zigPass = zigPricePass and cStructurePass and bTimePass and cTimePass
                         if zigPass
                             if not confirmed
                                 confirmed := true
                                 primary := "Zig-Zag"
                                 selectedSubtype := cVsA <= 1.618 ? "ZIG_ZAG_NORMAL" : "ZIG_ZAG_ELONGATED"
                                 selectedBRatio := bRatio
-                                internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount)
+                                [aDiagonalConfirmed, aDiagonalSubtype, aDiagonalReason, aDiagonalDivergence, aDiagonalPattern] = f_eval_diagonal(startIndex, aIndex, "leading")
+                                internalPattern := (aDiagonalConfirmed ? "LD " : "") + str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount) + (cDiagonalConfirmed ? " ED" : "")
                                 selectedACount := aCount
                                 selectedBCount := bCount
                                 selectedCCount := cCount
@@ -408,8 +461,8 @@ f_eval_simple_correction(startIndex, endIndex) =>
             aCount = f_correction_count_option(aOption)
             for bOption = 0 to 2
                 bCount = f_correction_count_option(bOption)
-                for cOption = 0 to 4
-                    cCount = f_impulse_count(cOption)
+                for cOption = 0 to 5
+                    cCount = f_c_motive_count(cOption)
                     if startIndex + aCount + bCount + cCount == endIndex
                         [bRatio, cVsA, cVsB] = f_correction_ratios(startIndex, aCount, bCount, cCount)
                         aIndex = startIndex + aCount
@@ -421,16 +474,18 @@ f_eval_simple_correction(startIndex, endIndex) =>
                         bTimePass = math.abs(bDuration - aDuration) <= timeToleranceBars or math.abs(bDuration - 2.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 5.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 10.0 * aDuration) <= timeToleranceBars
                         cTimePass = math.abs(cDuration - 0.25 * abDuration) <= timeToleranceBars or math.abs(cDuration - 0.50 * abDuration) <= timeToleranceBars or math.abs(cDuration - abDuration) <= timeToleranceBars
                         flatPricePass = not na(bRatio) and bRatio >= flatBMinRetrace and bRatio <= flatBMaxRetrace and not na(cVsA) and cVsA >= 0.618 and cVsA <= 2.618
+                        [cDiagonalConfirmed, cDiagonalSubtype, cDiagonalReason, cDiagonalDivergence, cDiagonalPattern] = f_eval_diagonal(bIndex, endIndex, "ending")
+                        cStructurePass = cCount != 15 or cDiagonalConfirmed
                         sawBTimeFailure := sawBTimeFailure or (flatPricePass and not bTimePass)
                         sawCTimeFailure := sawCTimeFailure or (flatPricePass and bTimePass and not cTimePass)
-                        flatPass = flatPricePass and bTimePass and cTimePass
+                        flatPass = flatPricePass and cStructurePass and bTimePass and cTimePass
                         if flatPass
                             if not confirmed
                                 confirmed := true
                                 primary := "Flat"
                                 selectedSubtype := bRatio <= 0.812 ? (cVsA <= 1.618 ? "FLAT_NORMAL" : "FLAT_ELONGATED") : (cVsA <= 1.618 ? "FLAT_STRONG_IRREGULAR" : "FLAT_RUNNING")
                                 selectedBRatio := bRatio
-                                internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount)
+                                internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount) + (cDiagonalConfirmed ? " ED" : "")
                                 selectedACount := aCount
                                 selectedBCount := bCount
                                 selectedCCount := cCount
@@ -1285,6 +1340,7 @@ if originBroken
     lockedAtBar := na
     lockedDegreeProgress := na
     lockedInternalCount := na
+    lockedW1Subtype := ""
     lockedImportantHigh := na
     lockedImportantLow := na
     engineStage := "SEARCHING"
@@ -1565,7 +1621,9 @@ if changed
                     if w4Index >= 0 and latestIndex > w4Index
                         internalCount = latestIndex - w4Index
                         correctSide = latestType == (lockedBullish ? 1 : -1)
-                        internalValid = f_is_impulse_count(internalCount) and correctSide
+                        [endingConfirmed, endingSubtype, endingReason, endingDivergence, endingPattern] = f_eval_diagonal(w4Index, latestIndex, "ending")
+                        endingConfirmed := endingConfirmed and correctSide
+                        internalValid = (f_is_impulse_count(internalCount) and correctSide) or endingConfirmed
                         projection = f_ratio(math.abs(latestPrice - lockedW4Price), math.abs(lockedW3Price - lockedW4Price))
                         w1Length = math.abs(lockedW1Price - lockedBasePrice)
                         w3Length = math.abs(lockedW3Price - lockedW2Price)
@@ -1573,7 +1631,7 @@ if changed
                         w3Shortest = w3Length < w1Length and w3Length < w5Length
                         latestMacd = array.get(swingMacdHist, latestIndex)
                         divergence = lockedBullish ? latestPrice > lockedW3Price and latestMacd < lockedW3Macd : latestPrice < lockedW3Price and latestMacd > lockedW3Macd
-                        divergencePass = wave5DivergenceMode != "Required" or divergence
+                        divergencePass = endingConfirmed ? endingDivergence : wave5DivergenceMode != "Required" or divergence
                         normal = not na(projection) and projection >= wave5MinExtension and projection <= wave5MaxExtension
                         doubleExtension = lockedInternalCount > 5 and lockedW3InternalCount > 5
                         truncated = doubleExtension and not na(projection) and projection <= 0.812
@@ -1584,14 +1642,14 @@ if changed
                         timePass = f_w5_time_pass(w1Duration, w3Duration, w4Duration, w5Duration)
                         currentFibAnchor := "P3-P4 projection"
                         currentFibValue := projection
-                        currentInternalPattern := "Impulse candidate " + str.tostring(internalCount) + " moves"
+                        currentInternalPattern := endingConfirmed ? endingPattern : "Impulse candidate " + str.tostring(internalCount) + " moves"
                         currentInternalCount := internalCount
                         currentMacdState := divergence ? "W3/W5 DIVERGENCE PASS" : "W3/W5 DIVERGENCE ABSENT"
-                        primaryPattern := "Motive"
-                        if internalValid and not w3Shortest and divergencePass and (normal or truncated) and timePass
+                        primaryPattern := endingConfirmed ? "Ending Diagonal" : "Motive"
+                        if internalValid and not w3Shortest and divergencePass and (normal or truncated or endingConfirmed) and timePass
                             lockedW5Bar := latestBar
                             lockedW5Price := latestPrice
-                            lockedW5Subtype := truncated ? "W5_TRUNCATED" : "W5_NORMAL"
+                            lockedW5Subtype := endingConfirmed ? "W5_" + endingSubtype : truncated ? "W5_TRUNCATED" : "W5_NORMAL"
                             lockedW5Ratio := projection
                             currentTimeValue := f_ratio(math.max(1, latestBar - lockedW4Bar), math.max(1, lockedW1Bar - lockedBaseBar))
                             engineStage := "LARGER_CORRECTION_CONTAINER"
@@ -1602,7 +1660,7 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := w3Shortest ? "INVALID" : "FORMING"
-                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? "W5_INTERNAL_FAIL" : (normal or truncated) and not timePass ? "W5_TIME_GATE_FAIL" : "W5_PRICE_SUBTYPE_PENDING"
+                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? (internalCount == 15 ? endingReason : "W5_INTERNAL_FAIL") : (normal or truncated or endingConfirmed) and not timePass ? "W5_TIME_GATE_FAIL" : "W5_PRICE_SUBTYPE_PENDING"
                             currentNextCondition := not timePass ? "Need a permitted V4 Wave 5 time window." : "Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check."
                             developingText := correctSide ? "5?" : "raw"
                     else
@@ -1716,7 +1774,7 @@ if changed
                     if str.length(developingText) == 0
                         developingText := "Alt 0"
         else
-            [candidateStart, candidateEnd, candidateBullish, candidateProgress, candidateCount, candidateNote] = f_find_phase1_candidate()
+            [candidateStart, candidateEnd, candidateBullish, candidateProgress, candidateCount, candidateSubtype, candidateNote] = f_find_phase1_candidate()
             if candidateStart >= 0
                 baseLocked := true
                 lockedBullish := candidateBullish
@@ -1727,17 +1785,18 @@ if changed
                 lockedAtBar := bar_index
                 lockedDegreeProgress := candidateProgress
                 lockedInternalCount := candidateCount
+                lockedW1Subtype := candidateSubtype
                 lockedImportantHigh := array.get(swingImportantHigh, candidateStart)
                 lockedImportantLow := array.get(swingImportantLow, candidateStart)
                 engineStage := "W2_CORRECTION_CONTAINER"
                 candidateState := "CONFIRMED"
                 lastReasonCode := "W1_CONFIRMED"
-                primaryPattern := "Motive"
+                primaryPattern := str.contains(candidateSubtype, "LEADING_DIAGONAL") ? "Leading Diagonal" : "Motive"
                 alternatePattern := ""
                 currentFibAnchor := "Important H/L"
                 currentFibValue := candidateProgress
                 currentTimeValue := na
-                currentInternalPattern := str.tostring(candidateCount) + "-move impulse"
+                currentInternalPattern := str.contains(candidateSubtype, "LEADING_DIAGONAL") ? "5-3-5-3-5" : str.tostring(candidateCount) + "-move impulse"
                 currentInternalCount := candidateCount
                 currentMacdState := ""
                 currentNextCondition := "Need a valid W2 correction completion while Point 0 remains intact."
