@@ -470,6 +470,33 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             {"DOUBLE_CONFIRMED"},
         )
 
+    def test_t21_double_keeps_closed_post_y_evidence_before_pivot_recognition(self):
+        swings = _through_larger_wxy(confirmed=False)
+        y_idx = len(swings) - 1
+        y = swings[y_idx]
+        swings[y_idx] = replace(
+            y,
+            confirmed_position=y.position + 5,
+            confirmed_index=y.index + pd.Timedelta(days=5),
+        )
+        _append_prices(swings, [92])
+        closes = [90.0] * (swings[-1].confirmed_position + 1)
+        closes[y.position + 1] = 125.0
+        source = pd.DataFrame({"close": closes})
+        start_idx = len(_through_w5()) - 1
+
+        correction = _evaluate_double_correction(
+            swings,
+            start_idx,
+            len(swings) - 1,
+            self.config,
+            allow_triangle=True,
+            source=source,
+        )
+
+        self.assertTrue(correction["confirmed"])
+        self.assertEqual(correction["reason_code"], "DOUBLE_CONFIRMED")
+
     def test_t21_double_rejects_x_ratio_between_locked_small_and_large_bands(self):
         swings = _through_larger_wxy()
         start_idx = len(_through_w5()) - 1

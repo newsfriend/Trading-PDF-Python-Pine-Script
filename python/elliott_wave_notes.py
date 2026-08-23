@@ -1642,7 +1642,10 @@ def _double_post_y_confirmation(
 
     observations: list[tuple[int, float, int]] = []
     if source is not None and "close" in source:
-        first_position = max(y.position + 1, y.confirmed_position)
+        # V3.3 C19 starts with the first closed candle after terminal Y. The
+        # engine may recognize the Y pivot later, but it must not discard
+        # already-closed post-Y evidence when it evaluates that pivot.
+        first_position = y.position + 1
         last_position = min(
             deadline,
             swings[end_idx].confirmed_position,

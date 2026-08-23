@@ -130,6 +130,7 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertIn("WXY_38_2_RETRACE", self.source)
         self.assertIn("0-X_CLOSED_BREAK", self.source)
         self.assertIn("DOUBLE_CONFIRMATION_PENDING", self.source)
+        self.assertIn("max_bars_back(close, 5000)", self.source)
 
     def test_v4_triple_uses_distinct_xx_component_and_terminal_z(self):
         self.assertIn('primary := "W-X-Y-XX-Z"', self.source)

@@ -1,6 +1,12 @@
 //@version=6
 indicator("Elliott Wave Notes Overlay", overlay=true, max_lines_count=500, max_labels_count=500)
 
+// Post-Y confirmation uses a runtime-calculated close[offset]. Pine cannot
+// always infer the required historical buffer for dynamic offsets, so size
+// only the close buffer to the platform maximum instead of expanding every
+// series through indicator(max_bars_back=...).
+max_bars_back(close, 5000)
+
 // Source notes:
 // - EW Notes / Chartking material
 // - EWT cheat sheet
