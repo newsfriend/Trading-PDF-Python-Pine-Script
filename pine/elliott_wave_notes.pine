@@ -144,6 +144,7 @@ var string currentMacdState = ""
 var string currentNextCondition = "Need qualified Point 0 and Wave 1"
 var string hpSignalState = ""
 var float currentConfidence = na
+float routeConfidenceBonus = 0.0
 var string currentChannelState = ""
 var float currentChannelTarget = na
 var string currentTargetCluster = ""
@@ -1187,7 +1188,8 @@ f_update_time_table() =>
             stateColor = candidateState == "CONFIRMED" ? color.new(color.green, 0) : candidateState == "INVALID" ? color.new(color.red, 0) : color.new(color.orange, 0)
             fibEvidence = str.length(currentFibAnchor) > 0 and not na(currentFibValue) ? currentFibAnchor + " " + str.tostring(currentFibValue * 100.0, "#.##") + "%" : "waiting"
             patternEvidence = str.length(alternatePattern) > 0 ? primaryPattern + " | alt " + alternatePattern : primaryPattern
-            supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "") + (str.length(currentChannelState) > 0 ? " | " + currentChannelState : "") + (str.length(currentTargetCluster) > 0 ? " | " + currentTargetCluster : "") + (str.length(fbdCandidateState) > 0 ? " | " + fbdCandidateState : "") + (not na(currentConfidence) ? " | confidence " + str.tostring(currentConfidence, "#") : "")
+            routedConfidence = not na(currentConfidence) ? math.min(100.0, currentConfidence + routeConfidenceBonus) : na
+            supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "") + (str.length(currentChannelState) > 0 ? " | " + currentChannelState : "") + (str.length(currentTargetCluster) > 0 ? " | " + currentTargetCluster : "") + (str.length(fbdCandidateState) > 0 ? " | " + fbdCandidateState : "") + (not na(routedConfidence) ? " | confidence " + str.tostring(routedConfidence, "#") : "")
             table.cell(timeTable, 0, 0, engineMode == "Candidate State (V4 Full Cycle)" ? "EW V4" : "EW Phase 1", text_color=color.white, bgcolor=color.new(color.black, 0))
             table.cell(timeTable, 1, 0, candidateState, text_color=color.white, bgcolor=stateColor)
             table.cell(timeTable, 0, 1, "Degree", text_color=color.white, bgcolor=color.new(color.black, 15))
@@ -1441,6 +1443,8 @@ pivotMacdHist = macdHist[pivotRight]
 [route15Dir, route15Moves] = request.security(syminfo.tickerid, "15", f_degree_route_snapshot(9), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [route5Dir, route5Moves] = request.security(syminfo.tickerid, "5", f_degree_route_snapshot(12), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [route3Dir, route3Moves] = request.security(syminfo.tickerid, "3", f_degree_route_snapshot(15), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+routeParentAligned = timeframe.period == "W" ? routeWDir != 0 and routeWDir == routeMDir : timeframe.period == "D" ? routeDDir != 0 and routeDDir == routeWDir : timeframe.period == "288" ? route288Dir != 0 and route288Dir == routeDDir : timeframe.period == "240" ? route240Dir != 0 and route240Dir == routeDDir : timeframe.period == "60" ? route60Dir != 0 and route60Dir == route240Dir : timeframe.period == "15" ? route15Dir != 0 and route15Dir == route60Dir : timeframe.period == "5" ? route5Dir != 0 and route5Dir == route15Dir : timeframe.period == "3" ? route3Dir != 0 and route3Dir == route5Dir : false
+routeConfidenceBonus := routeParentAligned ? 5.0 : 0.0
 
 degreeImportantHigh = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.highest(high, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 degreeImportantLow = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.lowest(low, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -2059,4 +2063,4 @@ alertcondition(stateChanged and str.contains(hpSignalState, "HP SELL"), "EW HP S
 alertcondition(stateChanged and str.length(fbdCandidateState) > 0, "EW FBD FBO CANDIDATE", "EW FBD_FBO_CANDIDATE | {{ticker}} | chart {{interval}}")
 
 plot(currentChannelTarget, "EW channel target", color=color.new(color.blue, 100), display=display.data_window)
-plot(currentConfidence, "EW confidence", color=color.new(color.gray, 100), display=display.data_window)
+plot(not na(currentConfidence) ? math.min(100.0, currentConfidence + routeConfidenceBonus) : na, "EW confidence", color=color.new(color.gray, 100), display=display.data_window)

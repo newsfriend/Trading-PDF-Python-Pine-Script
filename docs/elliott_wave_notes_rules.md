@@ -91,7 +91,10 @@ including `ew_label`, `ew_parent_state`, `ew_primary_pattern`,
 `ew_fib_anchor`, `ew_fib_value`, `ew_time_value`, `ew_macd_state`,
 `ew_internal_pattern`, `ew_hp_signal`, `ew_channel_type`,
 `ew_channel_target`, `ew_target_cluster`, `ew_fbd_candidate`,
-`ew_support_evidence`, and `ew_next_condition`.
+`ew_support_evidence`, and `ew_next_condition`. Multi-degree output also exposes
+chronological `ew_parent_alignment`, `ew_context_alignment`, and
+`ew_routed_confidence`; these fields use confirmation timestamps so future
+parent direction is never backfilled into earlier bars.
 
 Pine draws locked labels 0-5 and A-B-C, W-X-Y, W-X-Y-XX-Z, or A-B-C-D-E for supported paths and shows the same parent
 state, pattern, evidence, reason, recount, and next-condition diagnostics in its

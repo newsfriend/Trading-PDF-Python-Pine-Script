@@ -20,7 +20,7 @@ setup collection is stored in the repository for future development.
 | --- | --- | --- | --- |
 | GEO P Momentum signals | Indicator | Signal engine | Implemented |
 | GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
-| Elliott Wave engine | Core impulse overlay | Core impulse state engine | P0 complete; supported Wave 1-5 paths implemented |
+| Elliott Wave engine | V4 full-cycle overlay | V4 full-cycle state engine | Milestone-2 code complete; milestone-3 chart acceptance pending |
 | Remaining PDF setups | - | - | Reference material only |
 
 ## GEO P Momentum
@@ -38,7 +38,8 @@ trendline or range breakout. Its confirmation logic includes:
 
 The default `PDF Auto` timeframe mapping follows the supplied Tide/Wave
 hierarchy. For example, on a 15-minute execution chart it uses 4H Tide and 1H
-Wave contexts for the Line #2 refinement.
+Wave contexts for the Line #2 refinement. Python uses the same intraday,
+daily, weekly, and monthly routing branches as both Pine scripts.
 
 The formulas used for PDF abbreviations that were not mathematically defined
 are documented in [docs/geo_p_momentum_pdf_rules.md](docs/geo_p_momentum_pdf_rules.md).

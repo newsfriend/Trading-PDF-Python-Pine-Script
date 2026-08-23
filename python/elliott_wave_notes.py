@@ -229,7 +229,6 @@ def compute_elliott_waves_multi_degree(
 
     base_cfg = config or ElliottWaveConfig()
     results: dict[str, pd.DataFrame] = {}
-    summaries: dict[str, dict[str, object]] = {}
     for route in ELLIOTT_DEGREE_ROUTES:
         source = candles_by_timeframe[route.timeframe].sort_index().iloc[-5000:]
         route_cfg = replace(
@@ -241,31 +240,27 @@ def compute_elliott_waves_multi_degree(
             pivot_right=route.pivot_length,
         )
         result = compute_elliott_waves(source, route_cfg)
-        direction = _latest_object_value(result, "ew_anchor_direction")
-        state = str(result.attrs.get("elliott_wave_state", {}).get("state", "SEARCHING"))
-        parent_direction = (
-            summaries.get(route.parent, {}).get("direction")
-            if route.parent is not None
-            else None
+        parent_alignment_series = _degree_alignment_series(
+            result, results.get(route.parent), route.parent
         )
-        context_direction = (
-            summaries.get(route.context_parent, {}).get("direction")
-            if route.context_parent is not None
-            else None
-        )
-        parent_alignment = _degree_alignment(direction, parent_direction, route.parent)
-        context_alignment = _degree_alignment(
-            direction, context_direction, route.context_parent
+        context_alignment_series = _degree_alignment_series(
+            result, results.get(route.context_parent), route.context_parent
         )
         result["ew_parent_degree"] = route.parent or ""
         result["ew_context_degree"] = route.context_parent or ""
-        result["ew_parent_alignment"] = parent_alignment
-        result["ew_context_alignment"] = context_alignment
-        if parent_alignment == "ALIGNED" and "ew_confidence" in result:
-            confidence_mask = result["ew_confidence"].notna()
-            result.loc[confidence_mask, "ew_confidence"] = (
-                result.loc[confidence_mask, "ew_confidence"] + 5.0
+        result["ew_parent_alignment"] = parent_alignment_series
+        result["ew_context_alignment"] = context_alignment_series
+        if "ew_confidence" in result:
+            confidence_events = _confirmed_value_events(result, "ew_confidence")
+            confirmed_confidence = pd.to_numeric(
+                _event_timeline(confidence_events, result.index), errors="coerce"
+            )
+            route_bonus = parent_alignment_series.eq("ALIGNED").astype(float) * 5.0
+            result["ew_routed_confidence"] = (
+                confirmed_confidence + route_bonus
             ).clip(upper=100.0)
+        parent_alignment = _latest_object_value(result, "ew_parent_alignment")
+        context_alignment = _latest_object_value(result, "ew_context_alignment")
         result.attrs["elliott_degree_route"] = {
             "key": route.key,
             "name": route.name,
@@ -278,7 +273,6 @@ def compute_elliott_waves_multi_degree(
             "context_alignment": context_alignment,
         }
         results[route.timeframe] = result
-        summaries[route.timeframe] = {"direction": direction, "state": state}
     return results
 
 
@@ -291,14 +285,67 @@ def _latest_object_value(frame: pd.DataFrame, column: str) -> str:
     return str(values.iloc[-1])
 
 
-def _degree_alignment(
-    direction: str, parent_direction: object, parent: str | None
-) -> str:
+def _degree_alignment_series(
+    child: pd.DataFrame,
+    parent: pd.DataFrame | None,
+    parent_name: str | None,
+) -> pd.Series:
+    """Return confirmation-safe parent alignment without backfilling history."""
+
+    if parent_name is None:
+        return pd.Series("ROOT", index=child.index, dtype="object")
     if parent is None:
-        return "ROOT"
-    if not direction or not parent_direction:
-        return "PENDING"
-    return "ALIGNED" if direction == str(parent_direction) else "DIVERGENT"
+        return pd.Series("PENDING", index=child.index, dtype="object")
+
+    child_events = _confirmed_direction_events(child)
+    parent_events = _confirmed_direction_events(parent)
+    child_direction = _event_timeline(child_events, child.index)
+    parent_direction = _event_timeline(parent_events, child.index)
+    return _alignment_values(child_direction, parent_direction, child.index)
+
+
+def _confirmed_direction_events(frame: pd.DataFrame) -> pd.Series:
+    return _confirmed_value_events(frame, "ew_anchor_direction").astype("object")
+
+
+def _confirmed_value_events(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame or "ew_confirmed_at" not in frame:
+        return pd.Series(dtype="object")
+    mask = frame[column].notna() & frame["ew_confirmed_at"].notna()
+    if not mask.any():
+        return pd.Series(dtype="object")
+    events = pd.Series(
+        frame.loc[mask, column].to_numpy(),
+        index=pd.Index(frame.loc[mask, "ew_confirmed_at"].to_numpy()),
+    )
+    return events[~events.index.duplicated(keep="last")].sort_index()
+
+
+def _event_timeline(events: pd.Series, index: pd.Index) -> pd.Series:
+    if events.empty:
+        return pd.Series("", index=index, dtype="object")
+    try:
+        expanded_index = events.index.union(index)
+        expanded = events.reindex(expanded_index).sort_index().ffill()
+        return expanded.reindex(index).fillna("").astype("object")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Degree-route indexes and confirmation timestamps must be comparable."
+        ) from exc
+
+
+def _alignment_values(
+    child_direction: pd.Series,
+    parent_direction: pd.Series,
+    index: pd.Index,
+) -> pd.Series:
+    child_values = child_direction.fillna("").astype(str).to_numpy()
+    parent_values = parent_direction.fillna("").astype(str).to_numpy()
+    values = np.full(len(index), "PENDING", dtype=object)
+    ready = (child_values != "") & (parent_values != "")
+    values[ready & (child_values == parent_values)] = "ALIGNED"
+    values[ready & (child_values != parent_values)] = "DIVERGENT"
+    return pd.Series(values, index=index, dtype="object")
 
 
 def _validate_config(cfg: ElliottWaveConfig) -> None:
@@ -375,6 +422,29 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         raise ValueError(f"anchor_direction must be one of {sorted(valid_anchor_directions)}")
     if cfg.important_lookback < 10:
         raise ValueError("important_lookback must be at least 10 bars")
+    positive_lengths = {
+        "pivot_left": cfg.pivot_left,
+        "pivot_right": cfg.pivot_right,
+        "max_swings": cfg.max_swings,
+        "important_atr_length": cfg.important_atr_length,
+        "rsi_length": cfg.rsi_length,
+        "macd_fast": cfg.macd_fast,
+        "macd_slow": cfg.macd_slow,
+        "macd_signal": cfg.macd_signal,
+        "oscillator_lookback": cfg.oscillator_lookback,
+    }
+    invalid_lengths = [name for name, value in positive_lengths.items() if value < 1]
+    if invalid_lengths:
+        raise ValueError(
+            "These Elliott configuration lengths must be positive: "
+            + ", ".join(invalid_lengths)
+        )
+    if (
+        cfg.min_swing_atr_multiple < 0
+        or cfg.min_swing_range_pct < 0
+        or cfg.important_atr_multiple < 0
+    ):
+        raise ValueError("Swing and ATR thresholds cannot be negative")
     if cfg.degree_retrace <= 0:
         raise ValueError("degree_retrace must be greater than 0")
     if not 0 < cfg.wave2_min_retrace <= cfg.wave2_max_retrace < 1:
@@ -383,9 +453,17 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         raise ValueError("Wave 4 normal retracement must be inside (0, 1)")
     if cfg.wave3_terminal_min_extension <= 0 or cfg.wave3_min_extension <= 0:
         raise ValueError("Wave 3 extension thresholds must be positive")
+    if cfg.wave3_max_extension < cfg.wave3_min_extension:
+        raise ValueError("Wave 3 maximum extension cannot be below its minimum")
+    if not 0 <= cfg.microscopic_retrace < 1 or cfg.microscopic_tolerance < 0:
+        raise ValueError("Microscopic Wave 2 thresholds are invalid")
+    if cfg.wave2_max_time <= 0 or cfg.diagnostic_time_tolerance_ratio < 0:
+        raise ValueError("Time thresholds must be positive/non-negative")
+    if not 0 < cfg.wave4_terminal_max_retrace < 1:
+        raise ValueError("wave4_terminal_max_retrace must be inside (0, 1)")
     if not 0 < cfg.flat_a_min_retrace < 1:
         raise ValueError("flat_a_min_retrace must be inside (0, 1)")
-    if cfg.flat_b_max_retrace < cfg.flat_b_min_retrace:
+    if cfg.flat_b_min_retrace <= 0 or cfg.flat_b_max_retrace < cfg.flat_b_min_retrace:
         raise ValueError("flat_b_max_retrace must be greater than or equal to flat_b_min_retrace")
     if not 0 < cfg.wave5_min_extension <= cfg.wave5_max_extension:
         raise ValueError(
@@ -397,10 +475,32 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
 
 def _normalize_ohlc(candles: pd.DataFrame) -> pd.DataFrame:
     normalized = candles.copy()
-    normalized.columns = [str(column).strip().lower() for column in normalized.columns]
+    normalized_columns = [str(column).strip().lower() for column in normalized.columns]
+    if len(normalized_columns) != len(set(normalized_columns)):
+        raise ValueError("OHLC column names must be unique after normalization")
+    normalized.columns = normalized_columns
     missing = [column for column in ("high", "low", "close") if column not in normalized.columns]
     if missing:
         raise ValueError(f"Missing required OHLC columns: {missing}")
+    if normalized.empty:
+        raise ValueError("OHLC input must contain at least one candle")
+    if normalized.index.has_duplicates:
+        raise ValueError("OHLC index must not contain duplicate timestamps/labels")
+    for column in ("high", "low", "close"):
+        try:
+            normalized[column] = pd.to_numeric(normalized[column], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"OHLC column {column!r} must be numeric") from exc
+    values = normalized.loc[:, ["high", "low", "close"]].to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("OHLC values must all be finite numbers")
+    invalid_range = (
+        (normalized["high"] < normalized["low"])
+        | (normalized["high"] < normalized["close"])
+        | (normalized["low"] > normalized["close"])
+    )
+    if invalid_range.any():
+        raise ValueError("Each OHLC candle must have a valid high/low price range")
     return normalized.sort_index()
 
 

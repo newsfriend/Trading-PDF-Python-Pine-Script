@@ -56,6 +56,18 @@ class GeoPMomentumConfig:
 
 
 OHLCV = ("open", "high", "low", "close", "volume")
+TRADE_COLUMNS = (
+    "side",
+    "entry_time",
+    "exit_time",
+    "entry",
+    "exit",
+    "stop",
+    "target_1",
+    "exit_reason",
+    "pnl_points",
+    "r_multiple",
+)
 
 
 def compute_signals(
@@ -72,6 +84,7 @@ def compute_signals(
     """
 
     cfg = config or GeoPMomentumConfig()
+    _validate_config(cfg)
     wave_source = _normalize_ohlcv(candles)
     tide_rule, line2_wave_rule = _resolve_timeframes(wave_source, cfg)
     wave = _frame_indicators(wave_source, cfg)
@@ -85,7 +98,7 @@ def compute_signals(
     else:
         tide = wave
 
-    if line2_wave_rule:
+    if cfg.use_line2_mtf_refinement and line2_wave_rule:
         line2_wave_source = _resample_ohlcv(wave_source, line2_wave_rule)
         line2_wave = _frame_indicators(line2_wave_source, cfg).reindex(wave.index, method="ffill")
     else:
@@ -383,7 +396,7 @@ def backtest_signals(signals: pd.DataFrame) -> pd.DataFrame:
                 trades.append(_trade_dict("SELL", entry_time, timestamp, entry, exit_price, stop, target, reason))
                 position = 0
 
-    return pd.DataFrame(trades)
+    return pd.DataFrame(trades, columns=TRADE_COLUMNS)
 
 
 def _frame_indicators(source: pd.DataFrame, cfg: GeoPMomentumConfig) -> pd.DataFrame:
@@ -449,12 +462,87 @@ def _frame_indicators(source: pd.DataFrame, cfg: GeoPMomentumConfig) -> pd.DataF
 
 def _normalize_ohlcv(candles: pd.DataFrame) -> pd.DataFrame:
     normalized = candles.copy()
-    normalized.columns = [str(column).strip().lower() for column in normalized.columns]
+    normalized_columns = [str(column).strip().lower() for column in normalized.columns]
+    if len(normalized_columns) != len(set(normalized_columns)):
+        raise ValueError("OHLCV column names must be unique after normalization.")
+    normalized.columns = normalized_columns
     missing = [column for column in OHLCV if column not in normalized.columns]
     if missing:
         raise ValueError(f"Missing required OHLCV columns: {missing}")
+    if normalized.empty:
+        raise ValueError("OHLCV input must contain at least one candle.")
+    if normalized.index.has_duplicates:
+        raise ValueError("OHLCV index must not contain duplicate timestamps/labels.")
+    for column in OHLCV:
+        try:
+            normalized[column] = pd.to_numeric(normalized[column], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"OHLCV column {column!r} must be numeric.") from exc
+    values = normalized.loc[:, list(OHLCV)].to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("OHLCV values must all be finite numbers.")
+    invalid_range = (
+        (normalized["high"] < normalized["low"])
+        | (normalized["high"] < normalized[["open", "close"]].max(axis=1))
+        | (normalized["low"] > normalized[["open", "close"]].min(axis=1))
+    )
+    if invalid_range.any():
+        raise ValueError("Each OHLCV candle must have a valid high/low price range.")
     normalized = normalized.sort_index()
     return normalized
+
+
+def _validate_config(cfg: GeoPMomentumConfig) -> None:
+    if cfg.timeframe_mode not in {"PDF Auto", "Manual"}:
+        raise ValueError('timeframe_mode must be "PDF Auto" or "Manual".')
+    if cfg.signal_mode not in {"Fast", "Balanced", "Strict PDF"}:
+        raise ValueError("signal_mode must be one of: Fast, Balanced, Strict PDF")
+
+    positive_lengths = {
+        "ti_fast": cfg.ti_fast,
+        "ti_slow": cfg.ti_slow,
+        "bb_length": cfg.bb_length,
+        "rsi_length": cfg.rsi_length,
+        "volume_length": cfg.volume_length,
+        "pivot_left": cfg.pivot_left,
+        "pivot_right": cfg.pivot_right,
+        "trend_fallback_lookback": cfg.trend_fallback_lookback,
+        "dmi_length": cfg.dmi_length,
+        "adx_smoothing": cfg.adx_smoothing,
+        "atr_length": cfg.atr_length,
+        "major_sr_lookback": cfg.major_sr_lookback,
+        "target_lookback": cfg.target_lookback,
+    }
+    invalid_lengths = [name for name, value in positive_lengths.items() if value < 1]
+    if invalid_lengths:
+        raise ValueError(
+            "These configuration lengths must be positive: "
+            + ", ".join(invalid_lengths)
+        )
+    if cfg.bb_mult <= 0:
+        raise ValueError("bb_mult must be positive.")
+    if cfg.band_trend_sync_bars < 0 or cfg.ema_cross_lookback < 0:
+        raise ValueError("Signal lookback bars cannot be negative.")
+    if not all(
+        0 <= value <= 100
+        for value in (
+            cfg.rsi_long_base,
+            cfg.rsi_short_base,
+            cfg.rsi_strong_long,
+            cfg.rsi_strong_short,
+        )
+    ):
+        raise ValueError("RSI thresholds must be inside [0, 100].")
+    if not 0 <= cfg.min_better_confirmations <= 4:
+        raise ValueError("min_better_confirmations must be inside [0, 4].")
+    if cfg.min_signal_confirmations is not None and not (
+        0 <= cfg.min_signal_confirmations <= 5
+    ):
+        raise ValueError("min_signal_confirmations must be inside [0, 5].")
+    if cfg.adx_floor < 0 or cfg.stop_atr_buffer < 0 or cfg.major_sr_min_atr < 0:
+        raise ValueError("ADX, stop-buffer, and support/resistance thresholds cannot be negative.")
+    if not 0 < cfg.fib_target_1 <= cfg.fib_target_2 <= cfg.fib_target_3:
+        raise ValueError("Fibonacci targets must be positive and ordered.")
 
 
 def _resolve_timeframes(candles: pd.DataFrame, cfg: GeoPMomentumConfig) -> tuple[str | None, str | None]:
@@ -480,6 +568,31 @@ def _infer_timeframe(index: pd.Index) -> str | None:
 
     if not isinstance(index, pd.DatetimeIndex) or len(index) < 2:
         return None
+    if len(index) >= 3:
+        try:
+            inferred = pd.infer_freq(index)
+        except ValueError:
+            inferred = None
+        if inferred:
+            upper = inferred.upper()
+            digits = ""
+            for character in upper:
+                if character.isdigit():
+                    digits += character
+                else:
+                    break
+            multiplier = int(digits or "1")
+            suffix = upper[len(digits) :]
+            if suffix.startswith("W"):
+                return "W" if multiplier == 1 else f"{multiplier}W"
+            if suffix.startswith(("ME", "MS", "BME", "BMS")):
+                return "M" if multiplier == 1 else f"{multiplier}M"
+            if suffix.startswith(("QE", "QS", "BQE", "BQS")):
+                months = multiplier * 3
+                return f"{months}M"
+            if suffix.startswith(("YE", "YS", "BYE", "BYS")):
+                months = multiplier * 12
+                return f"{months}M"
     deltas = index.to_series().diff().dropna()
     if deltas.empty:
         return None
@@ -499,6 +612,14 @@ def _infer_timeframe(index: pd.Index) -> str | None:
 
 def _pdf_timeframes(chart_timeframe: str) -> tuple[str, str]:
     """Map execution chart timeframes to the PDF's Tide/Wave hierarchy."""
+
+    tf = str(chart_timeframe).strip().upper()
+    unit = tf[-1:] if tf else ""
+    multiplier_text = tf[:-1] or "1"
+    if unit == "W" and multiplier_text.isdigit():
+        return "M", "M"
+    if unit == "M" and multiplier_text.isdigit():
+        return tf, tf
 
     minutes = _timeframe_to_minutes(chart_timeframe)
     if minutes is None:
@@ -552,7 +673,7 @@ def _resample_ohlcv(candles: pd.DataFrame, rule: str) -> pd.DataFrame:
     )
 
 
-def _to_pandas_resample_rule(timeframe: str) -> str:
+def _to_pandas_resample_rule(timeframe: str) -> str | pd.DateOffset:
     """Accept TradingView-style timeframes for Python parity runs."""
 
     tf = str(timeframe).strip()
@@ -574,7 +695,7 @@ def _to_pandas_resample_rule(timeframe: str) -> str:
     if unit == "W":
         return f"{multiplier}W"
     if unit == "M":
-        return f"{multiplier}ME"
+        return pd.offsets.MonthEnd(int(multiplier))
     return tf
 
 

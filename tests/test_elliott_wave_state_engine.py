@@ -12,6 +12,7 @@ from python.elliott_wave_notes import (
     _run_candidate_state,
     _evaluate_correction,
     _correction_rank_key,
+    _degree_alignment_series,
     _evaluate_double_correction,
     _evaluate_diagonal,
     _impulse_channel_evidence,
@@ -352,6 +353,12 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
                     wave5_max_extension=1.5,
                 ),
             )
+        with self.assertRaisesRegex(ValueError, "pivot_left"):
+            compute_elliott_waves(candles, replace(self.config, pivot_left=0))
+
+        duplicated = pd.concat([candles, candles])
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            compute_elliott_waves(duplicated, self.config)
 
     def test_v4_simple_correction_requires_exact_b_and_c_time_families(self):
         cfg = replace(self.config, time_tolerance_bars=0)
@@ -980,12 +987,36 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(results["60"].attrs["elliott_degree_route"]["parent"], "240")
         self.assertEqual(results["60"].attrs["elliott_degree_route"]["context_parent"], "288")
         self.assertEqual(results["3"].attrs["elliott_degree_route"]["pivot_length"], 15)
+        self.assertEqual(results["W"]["ew_parent_alignment"].iloc[0], "PENDING")
         for result in results.values():
             self.assertIn("ew_parent_alignment", result)
+            self.assertIn("ew_routed_confidence", result)
             self.assertLessEqual(len(result), 5000)
 
         with self.assertRaisesRegex(ValueError, "missing locked routes"):
             compute_elliott_waves_multi_degree({"D": candles}, self.config)
+
+    def test_degree_alignment_does_not_backfill_future_parent_direction(self):
+        index = pd.date_range("2025-01-01", periods=5, freq="D")
+        child = pd.DataFrame(
+            {
+                "ew_anchor_direction": [None, "bullish", None, None, None],
+                "ew_confirmed_at": [None, index[3], None, None, None],
+            },
+            index=index,
+        )
+        parent = pd.DataFrame(
+            {
+                "ew_anchor_direction": ["bullish", None, None, None, None],
+                "ew_confirmed_at": [index[2], None, None, None, None],
+            },
+            index=index,
+        )
+        alignment = _degree_alignment_series(child, parent, "M")
+        self.assertEqual(alignment.iloc[0], "PENDING")
+        self.assertEqual(alignment.iloc[1], "PENDING")
+        self.assertEqual(alignment.iloc[2], "PENDING")
+        self.assertEqual(alignment.iloc[3], "ALIGNED")
 
     def test_rsi_seed_waits_for_full_change_window(self):
         candles = pd.DataFrame(

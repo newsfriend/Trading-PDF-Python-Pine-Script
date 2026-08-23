@@ -194,6 +194,8 @@ class ElliottWavePineContractTests(unittest.TestCase):
             )
         self.assertIn("f_route_alignment_text(route60Dir, route240Dir, true)", self.source)
         self.assertIn("f_route_alignment_text(route60Dir, route288Dir, true)", self.source)
+        self.assertIn("routeConfidenceBonus := routeParentAligned ? 5.0 : 0.0", self.source)
+        self.assertIn("currentConfidence + routeConfidenceBonus", self.source)
         self.assertIn("routeMoves > 21", self.source)
         self.assertNotIn("routeMoves %", self.source)
 

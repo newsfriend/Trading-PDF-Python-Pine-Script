@@ -80,6 +80,20 @@ Latest screenshot requirement:
 `RSI > 50` is implemented as strictly greater than 50, so values such as 51 or
 52 qualify. `RSI < 50` is implemented as strictly less than 50.
 
+The complete `PDF Auto` chart-to-context routing, shared by Pine and Python,
+is:
+
+| Execution chart | Tide | Wave |
+| --- | --- | --- |
+| <=3 minutes | 15 minutes | 5 minutes |
+| >3 to 5 minutes | 60 minutes | 15 minutes |
+| >5 to 15 minutes | 240 minutes | 60 minutes |
+| >15 to 60 minutes | Daily | 240 minutes |
+| >60 to 240 minutes | Weekly | Daily |
+| Daily | Monthly | Weekly |
+| Weekly | Monthly | Monthly |
+| Monthly | Same monthly chart | Same monthly chart |
+
 ## Step 3 - Stop Loss
 
 - BUY trade: below BBC candle or below TLBO point.
