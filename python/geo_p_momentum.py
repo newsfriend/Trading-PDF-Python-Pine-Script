@@ -204,6 +204,11 @@ def compute_signals(
         | ((result["close"] - major_support) > result["wave_atr"] * cfg.major_sr_min_atr)
     )
 
+    # Consolidate the many indicator blocks before appending the final signal,
+    # risk and target columns. This avoids severe DataFrame fragmentation on
+    # current pandas versions without changing any values or index alignment.
+    result = result.copy()
+
     # Score PDF Buy/Sell rows and separate Better rows so strictness stays configurable.
     result["long_confirmations"] = _count_true(
         result["volume_long_ok"],
@@ -256,10 +261,18 @@ def compute_signals(
         & (result["short_confirmations"] >= required_signal_rows)
         & (result["short_better"] >= cfg.min_better_confirmations)
     )
-    full_buy_signal = result["long_setup"] & ~result["long_setup"].shift(1).fillna(False)
-    full_sell_signal = result["short_setup"] & ~result["short_setup"].shift(1).fillna(False)
-    line2_buy_signal = result["line2_buy_setup"] & ~result["line2_buy_setup"].shift(1).fillna(False)
-    line2_sell_signal = result["line2_sell_setup"] & ~result["line2_sell_setup"].shift(1).fillna(False)
+    full_buy_signal = result["long_setup"] & ~result["long_setup"].shift(
+        1, fill_value=False
+    )
+    full_sell_signal = result["short_setup"] & ~result["short_setup"].shift(
+        1, fill_value=False
+    )
+    line2_buy_signal = result["line2_buy_setup"] & ~result["line2_buy_setup"].shift(
+        1, fill_value=False
+    )
+    line2_sell_signal = result["line2_sell_setup"] & ~result[
+        "line2_sell_setup"
+    ].shift(1, fill_value=False)
     result["raw_buy_signal"] = full_buy_signal | line2_buy_signal
     result["raw_sell_signal"] = full_sell_signal | line2_sell_signal
 
@@ -375,7 +388,7 @@ def backtest_signals(signals: pd.DataFrame) -> pd.DataFrame:
 
 def _frame_indicators(source: pd.DataFrame, cfg: GeoPMomentumConfig) -> pd.DataFrame:
     out = pd.DataFrame(index=source.index)
-    out[OHLCV] = source[list(OHLCV)]
+    out[list(OHLCV)] = source[list(OHLCV)]
 
     basis, upper, lower = _bollinger(source["close"], cfg.bb_length, cfg.bb_mult)
     out["bb_basis"] = basis
