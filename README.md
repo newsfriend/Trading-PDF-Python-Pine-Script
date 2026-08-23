@@ -67,6 +67,8 @@ now provides:
 - Persistent labels 0-5 followed by validated A-B-C, with parent-state gates
   that prevent premature Wave 5 or correction labels.
 - Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.
+- HP Fibonacci opportunities remain visible during extended Wave-2 timing;
+  timing can keep W2 FORMING without cancelling a structurally valid HP zone.
 - Auditable pattern, subtype, Fib, time, momentum, reason, and next-condition
   output.
 

@@ -171,6 +171,25 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertNotIn("2", state["active"]["waves"])
         self.assertEqual(state["last_reason_code"], "W2_TIME_GATE_FAIL")
 
+    def test_client_hp_fib_signal_survives_extended_wave2_timing(self):
+        swings = _through_w2()
+        delayed = swings[-1]
+        swings[-1] = replace(
+            delayed,
+            price=20.0,
+            position=40,
+            confirmed_position=41,
+            index=pd.Timestamp("2025-02-10"),
+            confirmed_index=pd.Timestamp("2025-02-11"),
+        )
+        state = _run_candidate_state(swings, self.config)
+        final_event = state["events"][-1]["values"]
+
+        self.assertEqual(state["active"]["parent_state"], "W2_CORRECTION_CONTAINER")
+        self.assertEqual(state["last_reason_code"], "W2_TIME_GATE_FAIL")
+        self.assertEqual(final_event["ew_engine_state"], "FORMING")
+        self.assertEqual(final_event["ew_hp_signal"], "HP BUY ELIGIBLE")
+
     def test_t03_microscopic_w2_is_a_separate_subtype(self):
         swings = _confirmed_wave1()
         _append_prices(swings, [60, 61, 59, 60.5, 58])

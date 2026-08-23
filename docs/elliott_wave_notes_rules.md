@@ -56,6 +56,12 @@ container. A, B, and C are locked on their actual pivots only after a complete
 Zig-Zag or Flat terminal structure passes. Point 0 no longer invalidates the
 already-completed impulse during its following larger correction.
 
+HP BUY/SELL is evaluated separately from Wave-2 confirmation. A completed
+correction in the 61.8%-81.2% HP Fibonacci zone remains HP-eligible while Point
+0 is protected, even when the Wave-2 time gate fails and Wave 2 remains
+`FORMING`. Extended timing does not promote Wave 2 and does not cancel the HP
+Fibonacci opportunity.
+
 ## Important High/Low Context
 
 Pine reads 144 candles from the configured degree-source timeframe (Daily for

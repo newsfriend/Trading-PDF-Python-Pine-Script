@@ -52,7 +52,7 @@ The older manuals and chart images remain supporting references.
 | W-X-Y and W-X-Y-XX-Z classifiers | TBD | Connector rules, alternation, termination, and source-preset decisions. |
 | Six triangle variants | PARTIAL | Horizontal/Irregular/Running Contracting and Expanding classifiers run in Pine/Python with five corrective legs, size order, boundary direction, retracement evidence and thrust ranges. Apex/touch-count and closed B-D break confirmation remain pending. |
 | Leading and ending diagonal classifiers | TBD | Overlap, converging/diverging trend lines, and internal 3/5-wave rules. |
-| Channel, time, momentum, HP and FBD support engines | PARTIAL | Mandatory V4 Wave 2-5 time gates and structure-confirmed HP eligibility exist in both engines. Full channels, targets, FBD and confidence scoring remain pending. |
+| Channel, time, momentum, HP and FBD support engines | PARTIAL | Mandatory V4 Wave 2-5 time gates exist. HP eligibility is intentionally separate: a completed correction in the 61.8%-81.2% Fib zone remains eligible with Point 0 protected even when extended timing keeps W2 FORMING. Full channels, targets, FBD and confidence scoring remain pending. |
 | Automatic larger correction after Wave 5 | PARTIAL | Both engines now transition into `LARGER_CORRECTION_CONTAINER` and lock actual A-B-C pivots for complete Zig-Zag/Flat paths. W-X-Y, triples and triangles remain pending. |
 | Double-confirmation outcome | TBD | V4 resolves the rule; the 0-X break / 38.2% post-Y confirmation implementation remains pending. |
 | Pine/Python candle-for-candle parity | PARTIAL | State semantics/settings are aligned; identical exported market data still needs comparison. |

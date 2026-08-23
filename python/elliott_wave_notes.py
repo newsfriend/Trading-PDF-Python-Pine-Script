@@ -939,7 +939,7 @@ def _advance_impulse_state(
         subtype = "W2_MICROSCOPIC" if microscopic else "W2_NORMAL" if normal else "W2_OUTSIDE_NORMAL"
         hp_signal = (
             "HP BUY ELIGIBLE" if bullish else "HP SELL ELIGIBLE"
-        ) if deep and correction["confirmed"] and time_gate and cfg.hp_signal_mode != "Disabled" else ""
+        ) if deep and correction["confirmed"] and cfg.hp_signal_mode != "Disabled" else ""
 
         if correct_side and correction["confirmed"] and (normal or microscopic) and time_gate:
             record = _make_wave_record(

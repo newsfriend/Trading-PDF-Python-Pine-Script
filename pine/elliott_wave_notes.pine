@@ -1145,7 +1145,7 @@ if changed
                         currentInternalCount := internalCount
                         primaryPattern := correctionPrimary
                         alternatePattern := correctionAlternate
-                        hpSignalState := deep and correctionConfirmed and timePass and hpSignalMode != "Disabled" ? (lockedBullish ? "HP BUY ELIGIBLE" : "HP SELL ELIGIBLE") : ""
+                        hpSignalState := deep and correctionConfirmed and hpSignalMode != "Disabled" ? (lockedBullish ? "HP BUY ELIGIBLE" : "HP SELL ELIGIBLE") : ""
                         if correctSide and correctionConfirmed and (normal or microscopic) and timePass
                             lockedW2Bar := latestBar
                             lockedW2Price := latestPrice

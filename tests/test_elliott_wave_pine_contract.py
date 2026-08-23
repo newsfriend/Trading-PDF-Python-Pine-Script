@@ -89,6 +89,16 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(reason, self.source)
 
+    def test_hp_fib_opportunity_is_not_blocked_by_extended_w2_time(self):
+        self.assertIn(
+            'hpSignalState := deep and correctionConfirmed and hpSignalMode != "Disabled"',
+            self.source,
+        )
+        self.assertNotIn(
+            'hpSignalState := deep and correctionConfirmed and timePass',
+            self.source,
+        )
+
     def test_v4_six_triangle_families_are_classified(self):
         self.assertIn("f_eval_triangle", self.source)
         for subtype in (
