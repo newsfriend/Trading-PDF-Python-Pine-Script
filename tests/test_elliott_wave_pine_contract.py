@@ -112,6 +112,13 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.assertIn(subtype, self.source)
         self.assertIn('text="D"', self.source)
         self.assertIn('text="E"', self.source)
+        for field in (
+            "lockedTriangleTargetNear",
+            "lockedTriangleTargetFar",
+            "lockedTriangleInvalidation",
+        ):
+            self.assertIn(field, self.source)
+        self.assertIn("triangleInvalidLine = line.new", self.source)
 
 
 if __name__ == "__main__":

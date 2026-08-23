@@ -44,7 +44,9 @@ The core impulse implementation then provides:
 - normal and double-extension/truncated Wave 5 paths;
 - mandatory V4 closed-bar time windows for Waves 2, 3, 4, and 5;
 - all six contracting/expanding Triangle families with five-leg validation and
-  subtype-specific thrust ranges (never enabled for Wave 2);
+  subtype-specific thrust ranges (never enabled for Wave 2); and
+- absolute near/far triangle thrust targets plus the Wave-E invalidation price,
+  exported by Python and drawn as Pine chart levels.
 - W3-not-shortest and configurable W3/W5 divergence checks; and
 - an audit trail containing parent state, pattern, subtype, Fib anchor/value,
   internal structure, momentum, reason code, and next condition.

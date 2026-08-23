@@ -164,6 +164,9 @@ var float lockedDPrice = na
 var int lockedEBar = na
 var float lockedEPrice = na
 var string lockedCorrectionPattern = ""
+var float lockedTriangleTargetNear = na
+var float lockedTriangleTargetFar = na
+var float lockedTriangleInvalidation = na
 
 f_label_size() =>
     labelSizeInput == "tiny" ? size.tiny : labelSizeInput == "normal" ? size.normal : size.small
@@ -954,6 +957,14 @@ f_redraw_candidate() =>
             eLabel = label.new(lockedEBar, lockedEPrice, text="E", style=eStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | triangle complete")
             array.push(drawnLines, eLine)
             array.push(drawnLabels, eLabel)
+        if not na(lockedTriangleTargetNear) and not na(lockedTriangleTargetFar)
+            triangleAnchorBar = not na(lockedEBar) ? lockedEBar : lockedW4Bar
+            triangleNearLine = line.new(triangleAnchorBar, lockedTriangleTargetNear, bar_index, lockedTriangleTargetNear, extend=extend.right, color=color.new(color.green, 25), style=line.style_dashed)
+            triangleFarLine = line.new(triangleAnchorBar, lockedTriangleTargetFar, bar_index, lockedTriangleTargetFar, extend=extend.right, color=color.new(color.green, 55), style=line.style_dotted)
+            triangleInvalidLine = line.new(triangleAnchorBar, lockedTriangleInvalidation, bar_index, lockedTriangleInvalidation, extend=extend.right, color=color.new(color.red, 35), style=line.style_dotted)
+            array.push(targetLines, triangleNearLine)
+            array.push(targetLines, triangleFarLine)
+            array.push(targetLines, triangleInvalidLine)
         f_draw_locked_fib()
         if showDevelopingCandidates and str.length(developingText) > 0 and array.size(swingBars) > 0
             latestIndex = array.size(swingBars) - 1
@@ -1093,6 +1104,9 @@ if originBroken
     lockedEBar := na
     lockedEPrice := na
     lockedCorrectionPattern := ""
+    lockedTriangleTargetNear := na
+    lockedTriangleTargetFar := na
+    lockedTriangleInvalidation := na
     f_redraw_candidate()
 
 if changed
@@ -1257,6 +1271,10 @@ if changed
                             lockedW4Price := latestPrice
                             lockedW4Pattern := correctionPrimary
                             lockedW4Retrace := retrace
+                            if triangleConfirmed
+                                lockedTriangleTargetNear := lockedBullish ? latestPrice + triangleThrustMin : latestPrice - triangleThrustMin
+                                lockedTriangleTargetFar := lockedBullish ? latestPrice + triangleThrustMax : latestPrice - triangleThrustMax
+                                lockedTriangleInvalidation := latestPrice
                             currentTimeValue := f_ratio(math.max(1, latestBar - lockedW3Bar), math.max(1, lockedW2Bar - lockedW1Bar))
                             engineStage := "W5_FORMING"
                             candidateState := "CONFIRMED"
@@ -1364,6 +1382,9 @@ if changed
                                 lockedDPrice := array.get(swingPrices, dIndex)
                                 lockedEBar := latestBar
                                 lockedEPrice := latestPrice
+                                lockedTriangleTargetNear := lockedBullish ? latestPrice + triangleThrustMin : latestPrice - triangleThrustMin
+                                lockedTriangleTargetFar := lockedBullish ? latestPrice + triangleThrustMax : latestPrice - triangleThrustMax
+                                lockedTriangleInvalidation := latestPrice
                             lockedCorrectionPattern := correctionPrimary
                             engineStage := "CORRECTION_CONFIRMED"
                             candidateState := "CONFIRMED"

@@ -492,6 +492,9 @@ def _compute_candidate_state(
     result["ew_fib_value"] = np.nan
     result["ew_time_value"] = np.nan
     result["ew_confidence"] = np.nan
+    result["ew_target_near"] = np.nan
+    result["ew_target_far"] = np.nan
+    result["ew_invalidation_price"] = np.nan
 
     lifecycle = _run_candidate_state(swings, cfg, source)
     for event in lifecycle["events"]:
@@ -561,6 +564,11 @@ def _compute_candidate_state(
             )
             result.loc[swing.index, "ew_hp_signal"] = wave.get("hp_signal", "")
             result.loc[swing.index, "ew_confidence"] = wave.get("confidence", np.nan)
+            result.loc[swing.index, "ew_target_near"] = wave.get("target_near", np.nan)
+            result.loc[swing.index, "ew_target_far"] = wave.get("target_far", np.nan)
+            result.loc[swing.index, "ew_invalidation_price"] = wave.get(
+                "invalidation_price", np.nan
+            )
 
     result.attrs["elliott_wave_state"] = {
         "engine": "Candidate State",
@@ -837,6 +845,9 @@ def _make_wave_record(
     alternate: str = "",
     hp_signal: str = "",
     confidence: float = np.nan,
+    target_near: float = np.nan,
+    target_far: float = np.nan,
+    invalidation_price: float = np.nan,
 ) -> dict[str, object]:
     return {
         "swing_idx": swing_idx,
@@ -854,6 +865,9 @@ def _make_wave_record(
         "alternate": alternate,
         "hp_signal": hp_signal,
         "confidence": confidence,
+        "target_near": target_near,
+        "target_far": target_far,
+        "invalidation_price": invalidation_price,
     }
 
 
@@ -1203,6 +1217,11 @@ def _advance_impulse_state(
                 internal_pattern=str(correction["internal_pattern"]),
                 internal_count=int(correction["internal_count"]),
                 alternate=str(correction["alternate"]),
+                target_near=float(correction.get("thrust_target_near", np.nan)),
+                target_far=float(correction.get("thrust_target_far", np.nan)),
+                invalidation_price=float(
+                    correction.get("invalidation_price", np.nan)
+                ),
             )
             waves["4"] = record
             active["parent_state"] = "W5_FORMING"
@@ -1383,6 +1402,21 @@ def _advance_impulse_state(
                     internal_pattern=str(correction["internal_pattern"]),
                     internal_count=int(correction["leg_counts"][label]),
                     alternate=str(correction["alternate"]),
+                    target_near=(
+                        float(correction.get("thrust_target_near", np.nan))
+                        if label == terminal_labels[-1]
+                        else np.nan
+                    ),
+                    target_far=(
+                        float(correction.get("thrust_target_far", np.nan))
+                        if label == terminal_labels[-1]
+                        else np.nan
+                    ),
+                    invalidation_price=(
+                        float(correction.get("invalidation_price", np.nan))
+                        if label == terminal_labels[-1]
+                        else np.nan
+                    ),
                 )
             active["parent_state"] = "CORRECTION_CONFIRMED"
             terminal_sequence = "-".join(terminal_labels)
@@ -1518,6 +1552,9 @@ def _evaluate_triangle_correction(
                         thrust_base = max(lengths) if family == "contracting" else e
                         thrust_min = 0.75 * thrust_base if family == "contracting" else 0.618 * thrust_base
                         thrust_max = 1.25 * thrust_base if family == "contracting" else thrust_base
+                        thrust_sign = 1.0 if swings[start_idx].kind == 1 else -1.0
+                        thrust_target_near = pe.price + thrust_sign * thrust_min
+                        thrust_target_far = pe.price + thrust_sign * thrust_max
                         return {
                             "confirmed": True,
                             "primary": "Triangle",
@@ -1534,6 +1571,9 @@ def _evaluate_triangle_correction(
                             "reason_code": "TRIANGLE_CONFIRMED",
                             "thrust_min": thrust_min,
                             "thrust_max": thrust_max,
+                            "thrust_target_near": thrust_target_near,
+                            "thrust_target_far": thrust_target_far,
+                            "invalidation_price": pe.price,
                             "note": (
                                 f"{subtype} passes five corrective legs, size order, "
                                 f"three >=50% retracements and boundary geometry; "
@@ -1557,6 +1597,9 @@ def _evaluate_triangle_correction(
         "reason_code": "TRIANGLE_GEOMETRY_PENDING",
         "thrust_min": np.nan,
         "thrust_max": np.nan,
+        "thrust_target_near": np.nan,
+        "thrust_target_far": np.nan,
+        "invalidation_price": np.nan,
         "note": "Five-leg size sequence or boundary geometry is incomplete.",
     }
 

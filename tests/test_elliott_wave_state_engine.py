@@ -133,6 +133,19 @@ def _triangle_from_endpoints(endpoints):
     return swings
 
 
+def _mirror_bearish(swings):
+    return [
+        replace(
+            swing,
+            price=100.0 - swing.price,
+            kind=-swing.kind,
+            macd_hist=-swing.macd_hist,
+            rsi=100.0 - swing.rsi,
+        )
+        for swing in swings
+    ]
+
+
 class ElliottWaveCandidateStateTests(unittest.TestCase):
     def setUp(self):
         self.config = ElliottWaveConfig(important_context_mode="Legacy bars")
@@ -189,6 +202,25 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(state["last_reason_code"], "W2_TIME_GATE_FAIL")
         self.assertEqual(final_event["ew_engine_state"], "FORMING")
         self.assertEqual(final_event["ew_hp_signal"], "HP BUY ELIGIBLE")
+
+    def test_client_bearish_hp_sell_survives_extended_wave2_timing(self):
+        bullish = _through_w2()
+        delayed = bullish[-1]
+        bullish[-1] = replace(
+            delayed,
+            price=20.0,
+            position=40,
+            confirmed_position=41,
+            index=pd.Timestamp("2025-02-10"),
+            confirmed_index=pd.Timestamp("2025-02-11"),
+        )
+        state = _run_candidate_state(_mirror_bearish(bullish), self.config)
+        final_event = state["events"][-1]["values"]
+
+        self.assertEqual(state["active"]["parent_state"], "W2_CORRECTION_CONTAINER")
+        self.assertEqual(state["last_reason_code"], "W2_TIME_GATE_FAIL")
+        self.assertEqual(final_event["ew_engine_state"], "FORMING")
+        self.assertEqual(final_event["ew_hp_signal"], "HP SELL ELIGIBLE")
 
     def test_t03_microscopic_w2_is_a_separate_subtype(self):
         swings = _confirmed_wave1()
@@ -366,6 +398,8 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(triangle["labels"], ("A", "B", "C", "D", "E"))
         self.assertEqual(triangle["internal_pattern"], "3-3-3-3-3")
         self.assertGreater(triangle["thrust_max"], triangle["thrust_min"])
+        self.assertEqual(triangle["invalidation_price"], 108.0)
+        self.assertGreater(triangle["thrust_target_far"], triangle["thrust_target_near"])
 
     def test_v4_completed_triangle_confirms_wave4_before_wave5(self):
         state = _run_candidate_state(
@@ -377,6 +411,13 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(
             state["active"]["waves"]["4"]["subtype"],
             "W4_HORIZONTAL_CONTRACTING",
+        )
+        self.assertEqual(
+            state["active"]["waves"]["4"]["invalidation_price"], 108.0
+        )
+        self.assertGreater(
+            state["active"]["waves"]["4"]["target_far"],
+            state["active"]["waves"]["4"]["target_near"],
         )
 
     def test_v4_all_six_triangle_size_and_boundary_families(self):

@@ -63,7 +63,7 @@ now provides:
   extension, overlap, shortest-wave, and divergence checks.
 - Mandatory V4 closed-bar confirmation windows for Waves 2-5.
 - Six Triangle families with A-B-C-D-E structure, boundary/size checks, and
-  contracting or expanding thrust ranges.
+  contracting or expanding thrust targets plus Wave-E invalidation levels.
 - Persistent labels 0-5 followed by validated A-B-C, with parent-state gates
   that prevent premature Wave 5 or correction labels.
 - Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.
