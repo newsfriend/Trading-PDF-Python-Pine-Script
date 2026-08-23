@@ -127,6 +127,38 @@ def _through_larger_wxy(*, confirmed=True):
     return swings
 
 
+def _double_from_components(w_pattern, y_pattern):
+    swings = [_swing(0, 175, 1)]
+    if w_pattern == "Zig-Zag":
+        _append_prices(swings, [160, 168, 150, 158, 140])
+        _append_prices(swings, [150, 145, 157.5])
+        _append_prices(swings, [145, 150, 130, 138, 120])
+        _append_prices(swings, [145])
+    else:
+        _append_prices(swings, [160, 168, 150])
+        _append_prices(swings, [160, 155, 168])
+        _append_prices(swings, [158, 164, 145, 152, 135])
+        _append_prices(swings, [150])
+
+    if y_pattern == "Zig-Zag":
+        _append_prices(swings, [138, 145, 128, 136, 120])
+        _append_prices(swings, [130, 125, 135])
+        _append_prices(swings, [125, 132, 112, 120, 100])
+    elif y_pattern == "Flat":
+        _append_prices(swings, [140, 146, 130])
+        _append_prices(swings, [142, 136, 145])
+        _append_prices(swings, [136, 141, 123, 132, 110])
+    else:
+        _append_prices(swings, [125, 135, 95])
+        _append_prices(swings, [110, 100, 130])
+        _append_prices(swings, [115, 125, 105])
+        _append_prices(swings, [115, 110, 123])
+        _append_prices(swings, [112, 118, 108])
+
+    _append_prices(swings, [140])
+    return swings
+
+
 def _triple_from_origin():
     swings = [_swing(0, 175, 1)]
     _append_prices(swings, [160, 168, 150, 158, 140])
@@ -445,6 +477,27 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(confirmed["labels"], ("W", "X", "Y"))
         self.assertEqual(confirmed["confirmation_index"], len(confirmed_swings) - 1)
         self.assertEqual(confirmed["reason_code"], "DOUBLE_CONFIRMED")
+
+    def test_t21_double_acceptance_matrix_classifies_locked_component_families(self):
+        cases = (
+            ("Zig-Zag", "Flat", "DOUBLE_ZIG_ZAG_FLAT"),
+            ("Flat", "Zig-Zag", "DOUBLE_FLAT_ZIG_ZAG"),
+            ("Flat", "Flat", "DOUBLE_FLAT_FLAT"),
+            ("Zig-Zag", "Triangle", "DOUBLE_ZIG_ZAG_TRIANGLE"),
+        )
+        for w_pattern, y_pattern, expected_subtype in cases:
+            with self.subTest(w=w_pattern, y=y_pattern):
+                swings = _double_from_components(w_pattern, y_pattern)
+                correction = _evaluate_double_correction(
+                    swings,
+                    0,
+                    len(swings) - 1,
+                    self.config,
+                    allow_triangle=True,
+                )
+
+                self.assertTrue(correction["confirmed"])
+                self.assertEqual(correction["subtype"], expected_subtype)
 
     def test_t21_double_confirmation_uses_closed_candle_data_when_available(self):
         swings = _through_larger_wxy(confirmed=False)

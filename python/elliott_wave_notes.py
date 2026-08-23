@@ -1585,8 +1585,9 @@ def _component_total_counts(cfg: ElliottWaveConfig) -> tuple[int, ...]:
     # V4 acceptance combinations use canonical Flat (11), Zig-Zag (13) and
     # five-leg/extended component (15) containers. Bounding the parent search
     # to these totals keeps Pine/Python parity deterministic and avoids an
-    # exponential candidate explosion; nested complex children remain a later
-    # degree-router concern rather than being guessed at the same degree.
+    # exponential candidate explosion. V4 Q1 locks W to a simple Zig-Zag/Flat
+    # component and Y to Zig-Zag/Flat/Triangle at this degree; lower-degree
+    # subdivisions belong to the degree router and are not guessed recursively.
     return tuple(total for total in (11, 13, 15) if total in totals)
 
 
