@@ -470,6 +470,42 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             {"DOUBLE_CONFIRMED"},
         )
 
+    def test_t21_double_rejects_x_ratio_between_locked_small_and_large_bands(self):
+        swings = _through_larger_wxy()
+        start_idx = len(_through_w5()) - 1
+        w_idx = start_idx + 13
+        for x_count in (1, 3, 7, 11):
+            x_idx = w_idx + x_count
+            swings[x_idx] = replace(swings[x_idx], price=150.0)
+
+        correction = _evaluate_double_correction(
+            swings,
+            start_idx,
+            len(swings) - 1,
+            self.config,
+            allow_triangle=True,
+        )
+
+        self.assertFalse(correction["confirmed"])
+
+    def test_t21_double_rejects_post_y_confirmation_after_y_duration(self):
+        swings = _through_larger_wxy(confirmed=False)
+        y = swings[-1]
+        late_position = y.position + 14
+        swings.append(_swing(late_position, 125.0, -y.kind))
+        start_idx = len(_through_w5()) - 1
+
+        correction = _evaluate_double_correction(
+            swings,
+            start_idx,
+            len(swings) - 1,
+            self.config,
+            allow_triangle=True,
+        )
+
+        self.assertFalse(correction["confirmed"])
+        self.assertEqual(correction["reason_code"], "DOUBLE_CONFIRMATION_PENDING")
+
     def test_v4_parallel_classifier_returns_terminal_y_not_confirmation_swing(self):
         swings = _through_larger_wxy()
         start_idx = len(_through_w5()) - 1
@@ -497,6 +533,22 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(triple["leg_counts"]["XX"], 1)
         self.assertGreaterEqual(triple["fib_values"]["XX"], 0.50)
         self.assertLessEqual(triple["fib_values"]["XX"], 0.618)
+
+    def test_t22_triple_rejects_xx_crossing_point_x(self):
+        swings = _triple_from_origin()
+        x_idx = 14
+        xx_idx = 28
+        self.assertGreater(swings[xx_idx].kind, 0)
+        swings[xx_idx] = replace(
+            swings[xx_idx], price=swings[x_idx].price + 1.0
+        )
+
+        triple = _evaluate_triple_correction(
+            swings, 0, len(swings) - 1, self.config
+        )
+
+        self.assertFalse(triple["confirmed"])
+        self.assertEqual(triple["reason_code"], "TRIPLE_COMPONENT_PENDING")
 
     def test_v4_horizontal_contracting_triangle_uses_five_corrective_legs(self):
         swings = _contracting_triangle_from(_through_w3())
