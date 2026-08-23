@@ -155,6 +155,23 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.source,
         )
 
+    def test_v4_channel_cluster_confidence_and_fbd_support_are_exposed(self):
+        for token in (
+            "IMPULSE_2_4_PARALLEL_3",
+            "ZIG_ZAG_0B_PARALLEL_A",
+            "LOWER_DEGREE_W4_ZONE_0_25_ATR",
+            "FIB_CHANNEL_CLUSTER",
+            "FBO_BASE_CANDIDATE",
+            "currentConfidence",
+            "currentChannelTarget",
+            '"EW FBD FBO CANDIDATE"',
+            "channel24 = line.new",
+            "channel3 = line.new",
+            "zig0B = line.new",
+        ):
+            self.assertIn(token, self.source)
+        self.assertNotIn('lastReasonCode := "FBO_BASE_CANDIDATE"', self.source)
+
     def test_v4_double_wxy_uses_locked_fib_time_and_post_y_confirmation(self):
         self.assertIn("f_eval_complex_correction", self.source)
         self.assertIn("xRatio >= 0.142 and xRatio <= 0.50", self.source)

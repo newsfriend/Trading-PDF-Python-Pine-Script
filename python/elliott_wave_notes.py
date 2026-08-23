@@ -474,6 +474,10 @@ def _compute_candidate_state(
         "ew_macd_state",
         "ew_internal_pattern",
         "ew_hp_signal",
+        "ew_channel_type",
+        "ew_target_cluster",
+        "ew_fbd_candidate",
+        "ew_support_evidence",
     )
     for column in object_columns:
         result[column] = pd.Series(index=result.index, dtype="object")
@@ -502,6 +506,7 @@ def _compute_candidate_state(
     result["ew_target_near"] = np.nan
     result["ew_target_far"] = np.nan
     result["ew_invalidation_price"] = np.nan
+    result["ew_channel_target"] = np.nan
 
     lifecycle = _run_candidate_state(swings, cfg, source)
     for event in lifecycle["events"]:
@@ -575,6 +580,21 @@ def _compute_candidate_state(
             result.loc[swing.index, "ew_target_far"] = wave.get("target_far", np.nan)
             result.loc[swing.index, "ew_invalidation_price"] = wave.get(
                 "invalidation_price", np.nan
+            )
+            result.loc[swing.index, "ew_channel_type"] = wave.get(
+                "channel_type", ""
+            )
+            result.loc[swing.index, "ew_channel_target"] = wave.get(
+                "channel_target", np.nan
+            )
+            result.loc[swing.index, "ew_target_cluster"] = wave.get(
+                "target_cluster", ""
+            )
+            result.loc[swing.index, "ew_fbd_candidate"] = wave.get(
+                "fbd_candidate", ""
+            )
+            result.loc[swing.index, "ew_support_evidence"] = wave.get(
+                "support_evidence", ""
             )
 
     result.attrs["elliott_wave_state"] = {
@@ -782,6 +802,12 @@ def _run_candidate_state(
                             "ew_internal_pattern": transition["internal_pattern"],
                             "ew_internal_count": transition["internal_count"],
                             "ew_hp_signal": transition["hp_signal"],
+                            "ew_confidence": transition["confidence"],
+                            "ew_channel_type": transition["channel_type"],
+                            "ew_channel_target": transition["channel_target"],
+                            "ew_target_cluster": transition["target_cluster"],
+                            "ew_fbd_candidate": transition["fbd_candidate"],
+                            "ew_support_evidence": transition["support_evidence"],
                             "ew_base_locked": True,
                             "ew_base_price": base.price,
                             "ew_base_position": base.position,
@@ -853,6 +879,11 @@ def _make_wave_record(
     target_near: float = np.nan,
     target_far: float = np.nan,
     invalidation_price: float = np.nan,
+    channel_type: str = "",
+    channel_target: float = np.nan,
+    target_cluster: str = "",
+    fbd_candidate: str = "",
+    support_evidence: str = "",
 ) -> dict[str, object]:
     return {
         "swing_idx": swing_idx,
@@ -873,6 +904,11 @@ def _make_wave_record(
         "target_near": target_near,
         "target_far": target_far,
         "invalidation_price": invalidation_price,
+        "channel_type": channel_type,
+        "channel_target": channel_target,
+        "target_cluster": target_cluster,
+        "fbd_candidate": fbd_candidate,
+        "support_evidence": support_evidence,
     }
 
 
@@ -917,6 +953,12 @@ def _transition(
     internal_pattern: str = "",
     internal_count: int | float = np.nan,
     hp_signal: str = "",
+    confidence: float = np.nan,
+    channel_type: str = "",
+    channel_target: float = np.nan,
+    target_cluster: str = "",
+    fbd_candidate: str = "",
+    support_evidence: str = "",
 ) -> dict[str, object]:
     return locals()
 
@@ -966,6 +1008,9 @@ def _advance_impulse_state(
         ) if deep and correction["confirmed"] and cfg.hp_signal_mode != "Disabled" else ""
 
         if correct_side and correction["confirmed"] and (normal or microscopic) and time_gate:
+            confidence = 80.0 + (10.0 if hp_signal else 0.0) + (
+                10.0 if correction.get("target_cluster") else 0.0
+            )
             record = _make_wave_record(
                 swing_idx=terminal_idx,
                 pattern=str(correction["primary"]),
@@ -983,6 +1028,11 @@ def _advance_impulse_state(
                 internal_count=int(correction["internal_count"]),
                 alternate=str(correction["alternate"]),
                 hp_signal=hp_signal,
+                confidence=confidence,
+                channel_type=str(correction.get("channel_type", "")),
+                channel_target=float(correction.get("channel_target", np.nan)),
+                target_cluster=str(correction.get("target_cluster", "")),
+                support_evidence="HP_STRUCTURE_CONFIRMED" if hp_signal else "",
             )
             waves["2"] = record
             active["parent_state"] = "W3_FORMING"
@@ -1003,6 +1053,11 @@ def _advance_impulse_state(
                 internal_pattern=str(correction["internal_pattern"]),
                 internal_count=int(correction["internal_count"]),
                 hp_signal=hp_signal,
+                confidence=confidence,
+                channel_type=str(correction.get("channel_type", "")),
+                channel_target=float(correction.get("channel_target", np.nan)),
+                target_cluster=str(correction.get("target_cluster", "")),
+                support_evidence="HP_STRUCTURE_CONFIRMED" if hp_signal else "",
             )
 
         reason = (
@@ -1081,6 +1136,13 @@ def _advance_impulse_state(
             if internal_count > 5:
                 subtype += "_EXTENDED"
             time_ratio = _duration_ratio(p2, p3, p0, p1)
+            lower_degree_w4 = swings[end_idx - 1]
+            lower_tolerance = (
+                0.25 * lower_degree_w4.atr
+                if np.isfinite(lower_degree_w4.atr)
+                else 0.0
+            )
+            confidence = 90.0 if p3.macd_extreme else 80.0
             record = _make_wave_record(
                 swing_idx=end_idx,
                 pattern="Motive",
@@ -1094,6 +1156,10 @@ def _advance_impulse_state(
                 macd_state=macd_state,
                 internal_pattern="5/9/13/17/21-move impulse",
                 internal_count=internal_count,
+                confidence=confidence,
+                target_near=lower_degree_w4.price - lower_tolerance,
+                target_far=lower_degree_w4.price + lower_tolerance,
+                support_evidence="LOWER_DEGREE_W4_ZONE_0_25_ATR",
             )
             waves["3"] = record
             active["parent_state"] = "W4_CORRECTION_CONTAINER"
@@ -1113,6 +1179,8 @@ def _advance_impulse_state(
                 macd_state=macd_state,
                 internal_pattern="5/9/13/17/21-move impulse",
                 internal_count=internal_count,
+                confidence=confidence,
+                support_evidence="LOWER_DEGREE_W4_ZONE_0_25_ATR",
             )
         reason = (
             "W3_INTERNAL_FAIL"
@@ -1239,6 +1307,13 @@ def _advance_impulse_state(
                 invalidation_price=float(
                     correction.get("invalidation_price", np.nan)
                 ),
+                confidence=(
+                    90.0 if correction.get("target_cluster") else 80.0
+                ),
+                channel_type=str(correction.get("channel_type", "")),
+                channel_target=float(correction.get("channel_target", np.nan)),
+                target_cluster=str(correction.get("target_cluster", "")),
+                support_evidence="CORRECTION_CHANNEL_CONFIRMED",
             )
             waves["4"] = record
             active["parent_state"] = "W5_FORMING"
@@ -1258,6 +1333,11 @@ def _advance_impulse_state(
                 time_value=time_ratio,
                 internal_pattern=str(correction["internal_pattern"]),
                 internal_count=int(correction["internal_count"]),
+                confidence=float(record["confidence"]),
+                channel_type=str(record["channel_type"]),
+                channel_target=float(record["channel_target"]),
+                target_cluster=str(record["target_cluster"]),
+                support_evidence=str(record["support_evidence"]),
             )
         return _transition(
             candidate_label="4?" if correct_side else "",
@@ -1302,6 +1382,9 @@ def _advance_impulse_state(
             p5.price > p3.price and p5.macd_hist < p3.macd_hist
             if bullish
             else p5.price < p3.price and p5.macd_hist > p3.macd_hist
+        )
+        channel = _impulse_channel_evidence(
+            p2, p3, p4, p5, bullish, divergence, cfg
         )
         divergence_pass = (
             bool(ending_diagonal.get("divergence", False))
@@ -1348,6 +1431,12 @@ def _advance_impulse_state(
                         else "5/9/13/17/21-move impulse"
                     ),
                     internal_count=internal_count,
+                    confidence=float(channel["confidence"]),
+                    channel_type=str(channel["channel_type"]),
+                    channel_target=float(channel["channel_target"]),
+                    target_cluster=str(channel["target_cluster"]),
+                    fbd_candidate=str(channel["fbd_candidate"]),
+                    support_evidence=str(channel["support_evidence"]),
                 )
             subtype = (
                 f"W5_{ending_diagonal['subtype']}"
@@ -1377,6 +1466,12 @@ def _advance_impulse_state(
                 macd_state=macd_state,
                 internal_pattern=internal_pattern,
                 internal_count=internal_count,
+                confidence=min(100.0, float(channel["confidence"]) + 10.0),
+                channel_type=str(channel["channel_type"]),
+                channel_target=float(channel["channel_target"]),
+                target_cluster=str(channel["target_cluster"]),
+                fbd_candidate=str(channel["fbd_candidate"]),
+                support_evidence=str(channel["support_evidence"]),
             )
             waves["5"] = record
             active["parent_state"] = "LARGER_CORRECTION_CONTAINER"
@@ -1396,6 +1491,12 @@ def _advance_impulse_state(
                 macd_state=macd_state,
                 internal_pattern=internal_pattern,
                 internal_count=internal_count,
+                confidence=float(record["confidence"]),
+                channel_type=str(record["channel_type"]),
+                channel_target=float(record["channel_target"]),
+                target_cluster=str(record["target_cluster"]),
+                fbd_candidate=str(record["fbd_candidate"]),
+                support_evidence=str(record["support_evidence"]),
             )
         reason = "W5_W3_SHORTEST" if w3_shortest else "W5_INTERNAL_FAIL" if not internal_valid else "W5_PRICE_SUBTYPE_PENDING"
         return _transition(
@@ -1412,6 +1513,12 @@ def _advance_impulse_state(
             macd_state="W3/W5 DIVERGENCE PASS" if divergence else "W3/W5 DIVERGENCE ABSENT",
             internal_pattern="Impulse candidate",
             internal_count=internal_count,
+            confidence=float(channel["confidence"]),
+            channel_type=str(channel["channel_type"]),
+            channel_target=float(channel["channel_target"]),
+            target_cluster=str(channel["target_cluster"]),
+            fbd_candidate=str(channel["fbd_candidate"]),
+            support_evidence=str(channel["support_evidence"]),
         )
 
     if state == "LARGER_CORRECTION_CONTAINER":
@@ -1605,6 +1712,11 @@ def _with_correction_defaults(
     candidate.setdefault("fib_error", float("inf"))
     candidate.setdefault("time_error", float("inf"))
     candidate.setdefault("parent_score", 0)
+    candidate.setdefault("channel_type", "")
+    candidate.setdefault("channel_target", np.nan)
+    candidate.setdefault("target_cluster", "")
+    candidate.setdefault("fbd_candidate", "")
+    candidate.setdefault("support_evidence", "")
     return candidate
 
 
@@ -2494,6 +2606,25 @@ def _evaluate_simple_correction(
         )
         primary = candidates[0]
         alternate = candidates[1]["pattern"] if len(candidates) > 1 else ""
+        a_idx, b_idx, c_idx = primary["endpoint_indices"]
+        channel_type = ""
+        channel_target = np.nan
+        target_cluster = ""
+        if primary["pattern"] == "Zig-Zag":
+            origin = swings[start_idx]
+            a_point = swings[int(a_idx)]
+            b_point = swings[int(b_idx)]
+            c_point = swings[int(c_idx)]
+            channel_slope = (b_point.price - origin.price) / max(
+                1, b_point.position - origin.position
+            )
+            channel_target = a_point.price + channel_slope * (
+                c_point.position - a_point.position
+            )
+            tolerance = 0.25 * c_point.atr if np.isfinite(c_point.atr) else 0.0
+            channel_type = "ZIG_ZAG_0B_PARALLEL_A"
+            if abs(c_point.price - channel_target) <= tolerance:
+                target_cluster = "FIB_CHANNEL_CLUSTER"
         return {
             "confirmed": True,
             "primary": primary["pattern"],
@@ -2519,6 +2650,9 @@ def _evaluate_simple_correction(
             "subdivision_score": 3,
             "fib_error": primary["fib_error"],
             "time_error": primary["time_error"],
+            "channel_type": channel_type,
+            "channel_target": channel_target,
+            "target_cluster": target_cluster,
             "time_values": {
                 "A": primary["a_duration"],
                 "B": primary["b_duration"],
@@ -2783,6 +2917,52 @@ def _evaluate_diagonal(
         "w4_retrace": w4_retrace,
         "w5_ratio": w5_ratio,
         "invalidation_price": p4.price,
+    }
+
+
+def _impulse_channel_evidence(
+    p2: _Swing,
+    p3: _Swing,
+    p4: _Swing,
+    p5: _Swing,
+    bullish: bool,
+    divergence: bool,
+    cfg: ElliottWaveConfig,
+) -> dict[str, object]:
+    """Evaluate the locked 2-4 channel, parallel-through-3 target and FBO clue."""
+
+    slope = (p4.price - p2.price) / max(1, p4.position - p2.position)
+    lower_value = p2.price + slope * (p5.position - p2.position)
+    channel_target = p3.price + slope * (p5.position - p3.position)
+    projection_base = abs(p3.price - p4.price)
+    direction = 1.0 if bullish else -1.0
+    fib_targets = (
+        p4.price + direction * cfg.wave5_min_extension * projection_base,
+        p4.price + direction * cfg.wave5_max_extension * projection_base,
+    )
+    tolerance = 0.25 * p5.atr if np.isfinite(p5.atr) else 0.0
+    cluster = any(abs(channel_target - target) <= tolerance for target in fib_targets)
+    beyond_action = (
+        p5.price > channel_target + tolerance
+        if bullish
+        else p5.price < channel_target - tolerance
+    )
+    fbd_candidate = "FBO_BASE_CANDIDATE" if beyond_action and divergence else ""
+    channel_contact = abs(p5.price - channel_target) <= tolerance
+    confidence = 70.0
+    confidence += 10.0 if divergence else 0.0
+    confidence += 10.0 if cluster else 0.0
+    confidence += 10.0 if channel_contact else 0.0
+    return {
+        "channel_type": "IMPULSE_2_4_PARALLEL_3",
+        "channel_target": channel_target,
+        "channel_lower": lower_value,
+        "target_cluster": "FIB_CHANNEL_CLUSTER" if cluster else "",
+        "fbd_candidate": fbd_candidate,
+        "confidence": confidence,
+        "support_evidence": (
+            "CHANNEL_CONTACT" if channel_contact else "CHANNEL_PROJECTION"
+        ),
     }
 
 

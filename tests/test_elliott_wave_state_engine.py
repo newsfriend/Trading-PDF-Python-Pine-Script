@@ -12,6 +12,7 @@ from python.elliott_wave_notes import (
     _correction_rank_key,
     _evaluate_double_correction,
     _evaluate_diagonal,
+    _impulse_channel_evidence,
     _evaluate_simple_correction,
     _evaluate_triple_correction,
     _evaluate_triangle_correction,
@@ -357,6 +358,7 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         zig = _through_w2()
         normal = _evaluate_simple_correction(zig, 5, len(zig) - 1, self.config)
         self.assertEqual(normal["subtype"], "ZIG_ZAG_NORMAL")
+        self.assertEqual(normal["channel_type"], "ZIG_ZAG_0B_PARALLEL_A")
         zig[-1] = replace(zig[-1], price=35.0)
         elongated = _evaluate_simple_correction(zig, 5, len(zig) - 1, self.config)
         self.assertEqual(elongated["subtype"], "ZIG_ZAG_ELONGATED")
@@ -830,6 +832,18 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertIs(ranked[0], triple)
         self.assertIs(ranked[1], triangle)
 
+    def test_v4_impulse_channel_cluster_and_fbo_are_support_only(self):
+        p2 = _swing(0, 40, -1)
+        p3 = _swing(10, 100, 1, macd_hist=12)
+        p4 = _swing(20, 70, -1)
+        p5 = _swing(30, 150, 1, macd_hist=5)
+        evidence = _impulse_channel_evidence(
+            p2, p3, p4, p5, True, True, self.config
+        )
+        self.assertEqual(evidence["channel_type"], "IMPULSE_2_4_PARALLEL_3")
+        self.assertEqual(evidence["fbd_candidate"], "FBO_BASE_CANDIDATE")
+        self.assertGreaterEqual(evidence["confidence"], 70.0)
+
     def test_v4_triangle_is_never_considered_for_wave2(self):
         swings = _contracting_triangle_from(_confirmed_wave1())
         start_idx = len(_confirmed_wave1()) - 1
@@ -889,6 +903,11 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             "ew_reason_code",
             "ew_base_locked",
             "ew_recount_count",
+            "ew_channel_type",
+            "ew_channel_target",
+            "ew_target_cluster",
+            "ew_fbd_candidate",
+            "ew_support_evidence",
         ):
             self.assertIn(column, result.columns)
         self.assertEqual(result.attrs["elliott_wave_state"]["engine"], "Candidate State")

@@ -105,6 +105,7 @@ var drawnLabels = array.new_label()
 var targetLines = array.new_line()
 var anchorFibLines = array.new_line()
 var anchorFibLabels = array.new_label()
+var channelLines = array.new_line()
 var table timeTable = table.new(position.top_right, 2, 7, border_width=1)
 
 // Confirmed values are copied out of the raw swing arrays so later raw pivot
@@ -140,6 +141,11 @@ var int currentInternalCount = 0
 var string currentMacdState = ""
 var string currentNextCondition = "Need qualified Point 0 and Wave 1"
 var string hpSignalState = ""
+var float currentConfidence = na
+var string currentChannelState = ""
+var float currentChannelTarget = na
+var string currentTargetCluster = ""
+var string fbdCandidateState = ""
 var int lockedW2Bar = na
 var float lockedW2Price = na
 var string lockedW2Pattern = ""
@@ -230,11 +236,15 @@ f_clear_drawings() =>
     if array.size(anchorFibLabels) > 0
         for i = 0 to array.size(anchorFibLabels) - 1
             label.delete(array.get(anchorFibLabels, i))
+    if array.size(channelLines) > 0
+        for i = 0 to array.size(channelLines) - 1
+            line.delete(array.get(channelLines, i))
     array.clear(drawnLines)
     array.clear(drawnLabels)
     array.clear(targetLines)
     array.clear(anchorFibLines)
     array.clear(anchorFibLabels)
+    array.clear(channelLines)
 f_previous_same_type_index(index, pivotType) =>
     found = -1
     if index > 0
@@ -406,6 +416,19 @@ f_correction_ratios(startIndex, aCount, bCount, cCount) =>
     bLength = math.abs(bPrice - aPrice)
     cLength = math.abs(cPrice - bPrice)
     [f_ratio(bLength, aLength), f_ratio(cLength, aLength), f_ratio(cLength, bLength)]
+
+f_zig_channel_target(startIndex, aCount, bCount, terminalIndex) =>
+    aIndex = startIndex + aCount
+    bIndex = aIndex + bCount
+    originPrice = array.get(swingPrices, startIndex)
+    aPrice = array.get(swingPrices, aIndex)
+    bPrice = array.get(swingPrices, bIndex)
+    originBar = array.get(swingBars, startIndex)
+    aBar = array.get(swingBars, aIndex)
+    bBar = array.get(swingBars, bIndex)
+    terminalBar = array.get(swingBars, terminalIndex)
+    slope = f_ratio(bPrice - originPrice, math.max(1, bBar - originBar))
+    aPrice + slope * (terminalBar - aBar)
 
 f_eval_simple_correction(startIndex, endIndex) =>
     confirmed = false
@@ -1112,7 +1135,7 @@ f_update_time_table() =>
             stateColor = candidateState == "CONFIRMED" ? color.new(color.green, 0) : candidateState == "INVALID" ? color.new(color.red, 0) : color.new(color.orange, 0)
             fibEvidence = str.length(currentFibAnchor) > 0 and not na(currentFibValue) ? currentFibAnchor + " " + str.tostring(currentFibValue * 100.0, "#.##") + "%" : "waiting"
             patternEvidence = str.length(alternatePattern) > 0 ? primaryPattern + " | alt " + alternatePattern : primaryPattern
-            supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "")
+            supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "") + (str.length(currentChannelState) > 0 ? " | " + currentChannelState : "") + (str.length(currentTargetCluster) > 0 ? " | " + currentTargetCluster : "") + (str.length(fbdCandidateState) > 0 ? " | " + fbdCandidateState : "") + (not na(currentConfidence) ? " | confidence " + str.tostring(currentConfidence, "#") : "")
             table.cell(timeTable, 0, 0, engineMode == "Candidate State (V4 Full Cycle)" ? "EW V4" : "EW Phase 1", text_color=color.white, bgcolor=color.new(color.black, 0))
             table.cell(timeTable, 1, 0, candidateState, text_color=color.white, bgcolor=stateColor)
             table.cell(timeTable, 0, 1, "Degree", text_color=color.white, bgcolor=color.new(color.black, 15))
@@ -1237,6 +1260,12 @@ f_redraw_candidate() =>
             w4Label = label.new(lockedW4Bar, lockedW4Price, text="4", style=w4Style, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW4Pattern + " | retrace " + str.tostring(lockedW4Retrace * 100.0, "#.##") + "%")
             array.push(drawnLines, w4Line)
             array.push(drawnLabels, w4Label)
+            channelSlope = f_ratio(lockedW4Price - lockedW2Price, math.max(1, lockedW4Bar - lockedW2Bar))
+            channelParallelAtW4 = lockedW3Price + channelSlope * (lockedW4Bar - lockedW3Bar)
+            channel24 = line.new(lockedW2Bar, lockedW2Price, lockedW4Bar, lockedW4Price, extend=extend.right, color=color.new(color.blue, 45), style=line.style_dashed)
+            channel3 = line.new(lockedW3Bar, lockedW3Price, lockedW4Bar, channelParallelAtW4, extend=extend.right, color=color.new(color.blue, 25), style=line.style_dashed)
+            array.push(channelLines, channel24)
+            array.push(channelLines, channel3)
             if showTargets
                 targetBase = math.abs(lockedW3Price - lockedW4Price)
                 targetMin = lockedBullish ? lockedW4Price + targetBase * wave5MinExtension : lockedW4Price - targetBase * wave5MinExtension
@@ -1269,6 +1298,13 @@ f_redraw_candidate() =>
             cLabel = label.new(lockedCBar, lockedCPrice, text=f_locked_correction_label(2), style=cStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | component complete")
             array.push(drawnLines, cLine)
             array.push(drawnLabels, cLabel)
+            if str.contains(lockedCorrectionPattern, "Zig-Zag")
+                zigSlope = f_ratio(lockedBPrice - lockedW5Price, math.max(1, lockedBBar - lockedW5Bar))
+                zigParallelAtC = lockedAPrice + zigSlope * (lockedCBar - lockedABar)
+                zig0B = line.new(lockedW5Bar, lockedW5Price, lockedBBar, lockedBPrice, extend=extend.right, color=color.new(color.purple, 45), style=line.style_dashed)
+                zigA = line.new(lockedABar, lockedAPrice, lockedCBar, zigParallelAtC, extend=extend.right, color=color.new(color.purple, 25), style=line.style_dashed)
+                array.push(channelLines, zig0B)
+                array.push(channelLines, zigA)
         if not na(lockedDBar)
             dLine = line.new(lockedCBar, lockedCPrice, lockedDBar, lockedDPrice, color=correctionLineColor, width=3)
             dStyle = lockedBullish ? label.style_label_down : label.style_label_up
@@ -1385,6 +1421,11 @@ if originBroken
     lockedDegreeProgress := na
     lockedInternalCount := na
     lockedW1Subtype := ""
+    currentConfidence := na
+    currentChannelState := ""
+    currentChannelTarget := na
+    currentTargetCluster := ""
+    fbdCandidateState := ""
     lockedImportantHigh := na
     lockedImportantLow := na
     engineStage := "SEARCHING"
@@ -1488,6 +1529,13 @@ if changed
                         correctionBar = array.get(swingBars, correctionTerminalIndex)
                         correctionPrice = array.get(swingPrices, correctionTerminalIndex)
                         correctionType = array.get(swingTypes, correctionTerminalIndex)
+                        if correctionConfirmed and correctionPrimary == "Zig-Zag"
+                            zigChannelTarget = f_zig_channel_target(w1Index, correctionACount, correctionBCount, correctionTerminalIndex)
+                            zigTolerance = 0.25 * array.get(swingAtr, correctionTerminalIndex)
+                            currentChannelState := "ZIG_ZAG_0B_PARALLEL_A"
+                            currentChannelTarget := zigChannelTarget
+                            currentTargetCluster := math.abs(correctionPrice - zigChannelTarget) <= zigTolerance ? "FIB_CHANNEL_CLUSTER" : ""
+                            currentConfidence := 80.0 + (str.length(currentTargetCluster) > 0 ? 10.0 : 0.0)
                         retraceDenominator = math.abs(lockedW1Price - lockedBasePrice)
                         retrace = lockedBullish ? f_ratio(lockedW1Price - correctionPrice, retraceDenominator) : f_ratio(correctionPrice - lockedW1Price, retraceDenominator)
                         timeRatio = f_ratio(math.max(1, correctionBar - lockedW1Bar), math.max(1, lockedW1Bar - lockedBaseBar))
@@ -1558,6 +1606,9 @@ if changed
                             lockedW3Ratio := extension
                             lockedW3Macd := array.get(swingMacdHist, latestIndex)
                             currentTimeValue := f_ratio(math.max(1, latestBar - lockedW2Bar), math.max(1, lockedW1Bar - lockedBaseBar))
+                            currentChannelState := "LOWER_DEGREE_W4_ZONE_0_25_ATR"
+                            currentChannelTarget := array.get(swingPrices, latestIndex - 1)
+                            currentConfidence := array.get(swingMacdExtreme, latestIndex) ? 90.0 : 80.0
                             engineStage := "W4_CORRECTION_CONTAINER"
                             candidateState := "CONFIRMED"
                             lastReasonCode := "W3_CONFIRMED"
@@ -1615,6 +1666,13 @@ if changed
                         correctionBar = array.get(swingBars, correctionTerminalIndex)
                         correctionPrice = array.get(swingPrices, correctionTerminalIndex)
                         correctionType = array.get(swingTypes, correctionTerminalIndex)
+                        if correctionConfirmed and correctionPrimary == "Zig-Zag"
+                            zigChannelTarget = f_zig_channel_target(w3Index, correctionACount, correctionBCount, correctionTerminalIndex)
+                            zigTolerance = 0.25 * array.get(swingAtr, correctionTerminalIndex)
+                            currentChannelState := "ZIG_ZAG_0B_PARALLEL_A"
+                            currentChannelTarget := zigChannelTarget
+                            currentTargetCluster := math.abs(correctionPrice - zigChannelTarget) <= zigTolerance ? "FIB_CHANNEL_CLUSTER" : ""
+                            currentConfidence := 80.0 + (str.length(currentTargetCluster) > 0 ? 10.0 : 0.0)
                         retrace = f_ratio(math.abs(lockedW3Price - correctionPrice), math.abs(lockedW3Price - lockedBasePrice))
                         correctSide = correctionType == (lockedBullish ? -1 : 1)
                         w3Terminal = str.contains(lockedW3Subtype, "TERMINAL")
@@ -1691,6 +1749,19 @@ if changed
                         w4Duration = math.max(1, lockedW4Bar - lockedW3Bar)
                         w5Duration = math.max(1, latestBar - lockedW4Bar)
                         timePass = f_w5_time_pass(w1Duration, w3Duration, w4Duration, w5Duration)
+                        channelSlope = f_ratio(lockedW4Price - lockedW2Price, math.max(1, lockedW4Bar - lockedW2Bar))
+                        channelTarget = lockedW3Price + channelSlope * (latestBar - lockedW3Bar)
+                        channelTolerance = 0.25 * array.get(swingAtr, latestIndex)
+                        fibTargetMin = lockedBullish ? lockedW4Price + math.abs(lockedW3Price - lockedW4Price) * wave5MinExtension : lockedW4Price - math.abs(lockedW3Price - lockedW4Price) * wave5MinExtension
+                        fibTargetMax = lockedBullish ? lockedW4Price + math.abs(lockedW3Price - lockedW4Price) * wave5MaxExtension : lockedW4Price - math.abs(lockedW3Price - lockedW4Price) * wave5MaxExtension
+                        targetCluster = math.abs(channelTarget - fibTargetMin) <= channelTolerance or math.abs(channelTarget - fibTargetMax) <= channelTolerance
+                        channelContact = math.abs(latestPrice - channelTarget) <= channelTolerance
+                        beyondChannel = lockedBullish ? latestPrice > channelTarget + channelTolerance : latestPrice < channelTarget - channelTolerance
+                        currentChannelState := "IMPULSE_2_4_PARALLEL_3"
+                        currentChannelTarget := channelTarget
+                        currentTargetCluster := targetCluster ? "FIB_CHANNEL_CLUSTER" : ""
+                        fbdCandidateState := beyondChannel and divergence ? "FBO_BASE_CANDIDATE" : ""
+                        currentConfidence := 70.0 + (divergence ? 10.0 : 0.0) + (targetCluster ? 10.0 : 0.0) + (channelContact ? 10.0 : 0.0)
                         currentFibAnchor := "P3-P4 projection"
                         currentFibValue := projection
                         currentInternalPattern := endingConfirmed ? endingPattern : "Impulse candidate " + str.tostring(internalCount) + " moves"
@@ -1765,6 +1836,13 @@ if changed
                             correctionTerminalIndex := complexTerminalIndex
                         correctionTerminalPrice = array.get(swingPrices, correctionTerminalIndex)
                         correctionTerminalType = array.get(swingTypes, correctionTerminalIndex)
+                        if correctionConfirmed and correctionPrimary == "Zig-Zag"
+                            zigChannelTarget = f_zig_channel_target(w5Index, correctionACount, correctionBCount, correctionTerminalIndex)
+                            zigTolerance = 0.25 * array.get(swingAtr, correctionTerminalIndex)
+                            currentChannelState := "ZIG_ZAG_0B_PARALLEL_A"
+                            currentChannelTarget := zigChannelTarget
+                            currentTargetCluster := math.abs(correctionTerminalPrice - zigChannelTarget) <= zigTolerance ? "FIB_CHANNEL_CLUSTER" : ""
+                            currentConfidence := 80.0 + (str.length(currentTargetCluster) > 0 ? 10.0 : 0.0)
                         correctSide = correctionTerminalType == (lockedBullish ? -1 : 1)
                         primaryPattern := correctionPrimary
                         alternatePattern := correctionAlternate
@@ -1859,6 +1937,11 @@ if changed
                 currentMacdState := ""
                 currentNextCondition := "Need a valid W2 correction completion while Point 0 remains intact."
                 hpSignalState := ""
+                currentConfidence := na
+                currentChannelState := ""
+                currentChannelTarget := na
+                currentTargetCluster := ""
+                fbdCandidateState := ""
                 developingText := ""
             else if not originBroken
                 candidateState := "SEARCHING"
@@ -1887,3 +1970,7 @@ alertcondition(stateChanged and lastReasonCode == "W2_ORIGIN_BREAK", "EW CONTROL
 alertcondition(stateChanged and lastReasonCode == "CORRECTION_COMPLETE", "EW CORRECTION COMPLETE", "EW CORRECTION_COMPLETE | {{ticker}} | chart {{interval}}")
 alertcondition(stateChanged and str.contains(hpSignalState, "HP BUY"), "EW HP BUY", "EW HP_BUY | {{ticker}} | chart {{interval}}")
 alertcondition(stateChanged and str.contains(hpSignalState, "HP SELL"), "EW HP SELL", "EW HP_SELL | {{ticker}} | chart {{interval}}")
+alertcondition(stateChanged and str.length(fbdCandidateState) > 0, "EW FBD FBO CANDIDATE", "EW FBD_FBO_CANDIDATE | {{ticker}} | chart {{interval}}")
+
+plot(currentChannelTarget, "EW channel target", color=color.new(color.blue, 100), display=display.data_window)
+plot(currentConfidence, "EW confidence", color=color.new(color.gray, 100), display=display.data_window)
