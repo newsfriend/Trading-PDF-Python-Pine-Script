@@ -49,6 +49,9 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertIn("bRatio >= 0.01 and bRatio <= 0.618", self.source)
         self.assertIn("bRatio >= flatBMinRetrace", self.source)
         self.assertIn("bRatio <= flatBMaxRetrace", self.source)
+        self.assertIn("f_flat_a_pass", self.source)
+        self.assertIn('"FLAT_A_LT_38_2"', self.source)
+        self.assertIn(">= flatAMinRetrace", self.source)
 
     def test_simple_corrections_use_mandatory_time_gates_and_subtypes(self):
         for token in (
@@ -171,6 +174,28 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.source)
         self.assertNotIn('lastReasonCode := "FBO_BASE_CANDIDATE"', self.source)
+
+    def test_v4_locked_nine_degree_router_and_parent_alignment_are_present(self):
+        locked_routes = (
+            ('"M"', "2"),
+            ('"W"', "3"),
+            ('"D"', "5"),
+            ('"288"', "5"),
+            ('"240"', "5"),
+            ('"60"', "7"),
+            ('"15"', "9"),
+            ('"5"', "12"),
+            ('"3"', "15"),
+        )
+        for timeframe, pivot in locked_routes:
+            self.assertIn(
+                f"request.security(syminfo.tickerid, {timeframe}, f_degree_route_snapshot({pivot})",
+                self.source,
+            )
+        self.assertIn("f_route_alignment_text(route60Dir, route240Dir, true)", self.source)
+        self.assertIn("f_route_alignment_text(route60Dir, route288Dir, true)", self.source)
+        self.assertIn("routeMoves > 21", self.source)
+        self.assertNotIn("routeMoves %", self.source)
 
     def test_v4_double_wxy_uses_locked_fib_time_and_post_y_confirmation(self):
         self.assertIn("f_eval_complex_correction", self.source)

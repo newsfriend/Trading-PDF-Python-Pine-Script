@@ -13,7 +13,8 @@ main count by position or modulo arithmetic.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
@@ -29,6 +30,29 @@ _FIB_LEVELS = (
     (1.0, "100"),
     (1.11, "111"),
     (1.272, "1272"),
+)
+
+
+@dataclass(frozen=True)
+class ElliottDegreeRoute:
+    key: str
+    name: str
+    timeframe: str
+    parent: str | None
+    context_parent: str | None
+    pivot_length: int
+
+
+ELLIOTT_DEGREE_ROUTES = (
+    ElliottDegreeRoute("M", "Monthly", "M", None, None, 2),
+    ElliottDegreeRoute("W", "Weekly", "W", "M", None, 3),
+    ElliottDegreeRoute("D", "Daily", "D", "W", None, 5),
+    ElliottDegreeRoute("288", "288 Minute", "288", "D", None, 5),
+    ElliottDegreeRoute("240", "Four Hour", "240", "D", None, 5),
+    ElliottDegreeRoute("60", "Hourly", "60", "240", "288", 7),
+    ElliottDegreeRoute("15", "Fifteen Minute", "15", "60", None, 9),
+    ElliottDegreeRoute("5", "Five Minute", "5", "15", None, 12),
+    ElliottDegreeRoute("3", "Three Minute", "3", "5", None, 15),
 )
 
 
@@ -187,6 +211,96 @@ def compute_elliott_waves(
     return result
 
 
+def compute_elliott_waves_multi_degree(
+    candles_by_timeframe: Mapping[str, pd.DataFrame],
+    config: ElliottWaveConfig | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Run independent V4 counts for the locked nine-timeframe degree router."""
+
+    missing = [
+        route.timeframe
+        for route in ELLIOTT_DEGREE_ROUTES
+        if route.timeframe not in candles_by_timeframe
+    ]
+    if missing:
+        raise ValueError(
+            "candles_by_timeframe is missing locked routes: " + ", ".join(missing)
+        )
+
+    base_cfg = config or ElliottWaveConfig()
+    results: dict[str, pd.DataFrame] = {}
+    summaries: dict[str, dict[str, object]] = {}
+    for route in ELLIOTT_DEGREE_ROUTES:
+        source = candles_by_timeframe[route.timeframe].sort_index().iloc[-5000:]
+        route_cfg = replace(
+            base_cfg,
+            degree_preset="Manual",
+            degree_name=route.name,
+            degree_timeframe=route.timeframe,
+            pivot_left=route.pivot_length,
+            pivot_right=route.pivot_length,
+        )
+        result = compute_elliott_waves(source, route_cfg)
+        direction = _latest_object_value(result, "ew_anchor_direction")
+        state = str(result.attrs.get("elliott_wave_state", {}).get("state", "SEARCHING"))
+        parent_direction = (
+            summaries.get(route.parent, {}).get("direction")
+            if route.parent is not None
+            else None
+        )
+        context_direction = (
+            summaries.get(route.context_parent, {}).get("direction")
+            if route.context_parent is not None
+            else None
+        )
+        parent_alignment = _degree_alignment(direction, parent_direction, route.parent)
+        context_alignment = _degree_alignment(
+            direction, context_direction, route.context_parent
+        )
+        result["ew_parent_degree"] = route.parent or ""
+        result["ew_context_degree"] = route.context_parent or ""
+        result["ew_parent_alignment"] = parent_alignment
+        result["ew_context_alignment"] = context_alignment
+        if parent_alignment == "ALIGNED" and "ew_confidence" in result:
+            confidence_mask = result["ew_confidence"].notna()
+            result.loc[confidence_mask, "ew_confidence"] = (
+                result.loc[confidence_mask, "ew_confidence"] + 5.0
+            ).clip(upper=100.0)
+        result.attrs["elliott_degree_route"] = {
+            "key": route.key,
+            "name": route.name,
+            "timeframe": route.timeframe,
+            "parent": route.parent,
+            "context_parent": route.context_parent,
+            "pivot_length": route.pivot_length,
+            "history_bars": len(result),
+            "parent_alignment": parent_alignment,
+            "context_alignment": context_alignment,
+        }
+        results[route.timeframe] = result
+        summaries[route.timeframe] = {"direction": direction, "state": state}
+    return results
+
+
+def _latest_object_value(frame: pd.DataFrame, column: str) -> str:
+    if column not in frame:
+        return ""
+    values = frame[column].dropna()
+    if values.empty:
+        return ""
+    return str(values.iloc[-1])
+
+
+def _degree_alignment(
+    direction: str, parent_direction: object, parent: str | None
+) -> str:
+    if parent is None:
+        return "ROOT"
+    if not direction or not parent_direction:
+        return "PENDING"
+    return "ALIGNED" if direction == str(parent_direction) else "DIVERGENT"
+
+
 def _validate_config(cfg: ElliottWaveConfig) -> None:
     valid_engine_modes = {"Candidate State", "Legacy fixed cycle"}
     if cfg.engine_mode not in valid_engine_modes:
@@ -269,8 +383,14 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         raise ValueError("Wave 4 normal retracement must be inside (0, 1)")
     if cfg.wave3_terminal_min_extension <= 0 or cfg.wave3_min_extension <= 0:
         raise ValueError("Wave 3 extension thresholds must be positive")
+    if not 0 < cfg.flat_a_min_retrace < 1:
+        raise ValueError("flat_a_min_retrace must be inside (0, 1)")
     if cfg.flat_b_max_retrace < cfg.flat_b_min_retrace:
         raise ValueError("flat_b_max_retrace must be greater than or equal to flat_b_min_retrace")
+    if not 0 < cfg.wave5_min_extension <= cfg.wave5_max_extension:
+        raise ValueError(
+            "Wave 5 extension thresholds must be positive and ordered"
+        )
     if cfg.time_tolerance_bars < 0:
         raise ValueError("time_tolerance_bars cannot be negative")
 
@@ -607,10 +727,9 @@ def _compute_candidate_state(
         "alternate_base_count": lifecycle["alternate_count"],
         "last_reason_code": lifecycle["last_reason_code"],
         "pending_modules": [
-            "full diagonal classifier",
-            "full multi-degree routing",
-            "channel and supporting evidence engines",
-            "TradingView/Python parity validation",
+            "milestone-3 TradingView compile and chart replay",
+            "milestone-3 candle parity and performance evidence",
+            "milestone-3 client datasets and backtesting acceptance",
         ],
     }
     return result
@@ -1002,12 +1121,21 @@ def _advance_impulse_state(
             and _w2_minimum(cfg) <= retrace <= cfg.wave2_max_retrace
         )
         deep = bool(np.isfinite(retrace) and 0.618 <= retrace <= 0.812)
+        flat_a_pass = _flat_a_minimum_pass(
+            correction, swings, start_idx, abs(p1.price - p0.price), cfg
+        )
         subtype = "W2_MICROSCOPIC" if microscopic else "W2_NORMAL" if normal else "W2_OUTSIDE_NORMAL"
         hp_signal = (
             "HP BUY ELIGIBLE" if bullish else "HP SELL ELIGIBLE"
         ) if deep and correction["confirmed"] and cfg.hp_signal_mode != "Disabled" else ""
 
-        if correct_side and correction["confirmed"] and (normal or microscopic) and time_gate:
+        if (
+            correct_side
+            and correction["confirmed"]
+            and flat_a_pass
+            and (normal or microscopic)
+            and time_gate
+        ):
             confidence = 80.0 + (10.0 if hp_signal else 0.0) + (
                 10.0 if correction.get("target_cluster") else 0.0
             )
@@ -1062,7 +1190,9 @@ def _advance_impulse_state(
 
         reason = (
             "W2_TIME_GATE_FAIL"
-            if correction["confirmed"] and (normal or microscopic) and not time_gate
+            if correction["confirmed"] and flat_a_pass and (normal or microscopic) and not time_gate
+            else "FLAT_A_LT_38_2"
+            if correction["confirmed"] and not flat_a_pass
             else str(correction["reason_code"])
             if not correction["confirmed"]
             else "W2_RETRACE_OUTSIDE_NORMAL"
@@ -1224,6 +1354,10 @@ def _advance_impulse_state(
         w3_terminal = "TERMINAL" in str(waves["3"]["subtype"])
         max_retrace = cfg.wave4_terminal_max_retrace if w3_terminal else cfg.wave4_max_retrace
         price_pass = _w4_minimum(cfg) <= retrace <= max_retrace
+        p2 = swings[int(waves["2"]["swing_idx"])]
+        flat_a_pass = _flat_a_minimum_pass(
+            correction, swings, int(waves["3"]["swing_idx"]), abs(p3.price - p2.price), cfg
+        )
         overlap = p4.price <= p1.price if bullish else p4.price >= p1.price
         overlap_invalid = overlap and not w3_terminal
         if correction["confirmed"] and correct_side and overlap_invalid:
@@ -1242,7 +1376,7 @@ def _advance_impulse_state(
                 internal_pattern=str(correction["internal_pattern"]),
                 internal_count=int(correction["internal_count"]),
             )
-        if correction["confirmed"] and correct_side and price_pass:
+        if correction["confirmed"] and correct_side and flat_a_pass and price_pass:
             w2 = swings[int(waves["2"]["swing_idx"])]
             similarity = abs(float(waves["2"]["fib_value"]) - retrace)
             time_ratio = _duration_ratio(p3, p4, p1, w2)
@@ -1344,7 +1478,11 @@ def _advance_impulse_state(
             pattern=str(correction["primary"]),
             subtype="W4_CORRECTION_CONTAINER",
             reason_code=(
-                "W4_RETRACE_OUTSIDE_NORMAL" if correction["confirmed"] else str(correction["reason_code"])
+                "FLAT_A_LT_38_2"
+                if correction["confirmed"] and not flat_a_pass
+                else "W4_RETRACE_OUTSIDE_NORMAL"
+                if correction["confirmed"]
+                else str(correction["reason_code"])
             ),
             note=f"Wave 4 container remains open; retracement={retrace:.2%}; {correction['note']}",
             next_condition="Need a valid correction completion in the approved W4 range; W5 remains blocked.",
@@ -1498,12 +1636,27 @@ def _advance_impulse_state(
                 fbd_candidate=str(record["fbd_candidate"]),
                 support_evidence=str(record["support_evidence"]),
             )
-        reason = "W5_W3_SHORTEST" if w3_shortest else "W5_INTERNAL_FAIL" if not internal_valid else "W5_PRICE_SUBTYPE_PENDING"
+        extension_conflict = bool(
+            np.isfinite(ratio) and ratio > cfg.wave5_max_extension
+        )
+        reason = (
+            "W5_W3_SHORTEST"
+            if w3_shortest
+            else "W5_INTERNAL_FAIL"
+            if not internal_valid
+            else "W5_EXTENSION_REQUIRES_INSTRUMENT_RULE"
+            if extension_conflict
+            else "W5_PRICE_SUBTYPE_PENDING"
+        )
         return _transition(
             status="INVALID" if w3_shortest else "FORMING",
             candidate_label="5?" if correct_side else "",
             pattern="Motive",
-            subtype="W5_EXTENSION_TBD" if ratio > cfg.wave5_max_extension else "W5_CANDIDATE",
+            subtype=(
+                "W5_EXTENSION_SOURCE_CONFLICT"
+                if extension_conflict
+                else "W5_CANDIDATE"
+            ),
             reason_code=reason,
             note=f"Wave 5 forming: 3-4 projection={ratio:.2%}, internal moves={internal_count}.",
             next_condition="Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check.",
@@ -1534,7 +1687,12 @@ def _advance_impulse_state(
         terminal_idx = int(correction.get("terminal_index", end_idx))
         terminal = swings[terminal_idx]
         correct_side = terminal.kind == (-1 if bullish else 1)
-        if correction["confirmed"] and correct_side:
+        p4 = swings[int(waves["4"]["swing_idx"])]
+        p5 = swings[int(waves["5"]["swing_idx"])]
+        flat_a_pass = _flat_a_minimum_pass(
+            correction, swings, start_idx, abs(p5.price - p4.price), cfg
+        )
+        if correction["confirmed"] and correct_side and flat_a_pass:
             endpoint_indices = correction["endpoint_indices"]
             terminal_labels = correction["labels"]
             fib_values = correction.get("fib_values", {})
@@ -1603,7 +1761,11 @@ def _advance_impulse_state(
             candidate_label=candidate_label,
             pattern=str(correction["primary"]),
             subtype="LARGER_CORRECTION_CONTAINER",
-            reason_code=str(correction["reason_code"]),
+            reason_code=(
+                "FLAT_A_LT_38_2"
+                if correction["confirmed"] and not flat_a_pass
+                else str(correction["reason_code"])
+            ),
             note=(
                 "The motive 1-2-3-4-5 count is locked. The larger correction "
                 f"remains FORMING: {correction['note']}"
@@ -2798,6 +2960,23 @@ def _nearest_error(value: float, targets: tuple[float, ...]) -> float:
     if not np.isfinite(value):
         return float("inf")
     return min(abs(value - target) for target in targets)
+
+
+def _flat_a_minimum_pass(
+    correction: dict[str, object],
+    swings: list[_Swing],
+    start_idx: int,
+    preceding_length: float,
+    cfg: ElliottWaveConfig,
+) -> bool:
+    if correction.get("primary") != "Flat":
+        return True
+    endpoints = tuple(correction.get("endpoint_indices", ()))
+    if not endpoints:
+        return False
+    a_length = abs(swings[int(endpoints[0])].price - swings[start_idx].price)
+    a_ratio = _safe_ratio(a_length, preceding_length)
+    return bool(np.isfinite(a_ratio) and a_ratio >= cfg.flat_a_min_retrace)
 
 
 def _w2_minimum(cfg: ElliottWaveConfig) -> float:

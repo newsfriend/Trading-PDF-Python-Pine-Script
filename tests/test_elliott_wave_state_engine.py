@@ -5,8 +5,10 @@ import pandas as pd
 
 from python.elliott_wave_notes import (
     ElliottWaveConfig,
+    ELLIOTT_DEGREE_ROUTES,
     _Swing,
     compute_elliott_waves,
+    compute_elliott_waves_multi_degree,
     _run_candidate_state,
     _evaluate_correction,
     _correction_rank_key,
@@ -97,9 +99,9 @@ def _through_w3():
 
 def _through_w4():
     swings = _through_w3()
-    _append_prices(swings, [135, 140, 125])  # Flat A: 3 moves
-    _append_prices(swings, [135, 128, 140])  # B: 3 moves, 75% of A
-    _append_prices(swings, [132, 136, 120, 125, 110])  # C: 5 moves
+    _append_prices(swings, [120, 130, 100])  # Flat A: >=38.2% of W3
+    _append_prices(swings, [115, 108, 133.75])  # B: 75% of A
+    _append_prices(swings, [120, 128, 110, 120, 100])  # C: 75% of A
     return swings
 
 
@@ -303,9 +305,9 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
 
     def test_t05_flat_b_can_retrace_up_to_111_percent(self):
         swings = _confirmed_wave1()
-        _append_prices(swings, [52, 57, 42])
-        _append_prices(swings, [55, 48, 64.2])
-        _append_prices(swings, [55, 60, 50, 57, 42])
+        _append_prices(swings, [50, 55, 35])
+        _append_prices(swings, [50, 45, 64.97])
+        _append_prices(swings, [55, 60, 50, 57, 40])
         state = _run_candidate_state(swings, self.config)
 
         wave2 = state["active"]["waves"]["2"]
@@ -314,14 +316,42 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
 
     def test_t06_flat_b_above_111_percent_stays_unconfirmed(self):
         swings = _confirmed_wave1()
-        _append_prices(swings, [52, 57, 42])
-        _append_prices(swings, [55, 48, 65])
-        _append_prices(swings, [55, 60, 50, 57, 42])
+        _append_prices(swings, [50, 55, 35])
+        _append_prices(swings, [50, 45, 66])
+        _append_prices(swings, [55, 60, 50, 57, 40])
         state = _run_candidate_state(swings, self.config)
 
         self.assertEqual(state["active"]["parent_state"], "W2_CORRECTION_CONTAINER")
         self.assertNotIn("2", state["active"]["waves"])
         self.assertEqual(state["last_reason_code"], "FLAT_B_GT_111")
+
+    def test_v4_flat_a_must_retrace_38_2_percent_of_preceding_impulse(self):
+        swings = _confirmed_wave1()
+        _append_prices(swings, [58, 59, 52])  # A is only 16.1% of W1
+        _append_prices(swings, [57, 54, 60])
+        _append_prices(swings, [55, 58, 50, 55, 48])
+        state = _run_candidate_state(swings, self.config)
+        self.assertEqual(state["active"]["parent_state"], "W2_CORRECTION_CONTAINER")
+        self.assertEqual(state["last_reason_code"], "FLAT_A_LT_38_2")
+
+    def test_v4_new_thresholds_reject_invalid_configurations(self):
+        candles = pd.DataFrame(
+            {"high": [2.0], "low": [1.0], "close": [1.5]},
+            index=pd.date_range("2025-01-01", periods=1, freq="D"),
+        )
+        with self.assertRaisesRegex(ValueError, "flat_a_min_retrace"):
+            compute_elliott_waves(
+                candles, replace(self.config, flat_a_min_retrace=1.0)
+            )
+        with self.assertRaisesRegex(ValueError, "Wave 5 extension thresholds"):
+            compute_elliott_waves(
+                candles,
+                replace(
+                    self.config,
+                    wave5_min_extension=2.0,
+                    wave5_max_extension=1.5,
+                ),
+            )
 
     def test_v4_simple_correction_requires_exact_b_and_c_time_families(self):
         cfg = replace(self.config, time_tolerance_bars=0)
@@ -858,15 +888,25 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         _append_prices(swings, [55, 52, 56])
         _append_prices(swings, [50, 53, 46, 49, 42])
         _append_prices(swings, [70, 55, 85, 75, 100, 80, 120, 90, 145], final_macd=12)
-        _append_prices(swings, [135, 140, 125])
-        _append_prices(swings, [135, 128, 140])
-        _append_prices(swings, [132, 136, 120, 125, 110])
-        _append_prices(swings, [120, 113, 130, 118, 138], final_macd=5)
+        _append_prices(swings, [120, 130, 100])
+        _append_prices(swings, [115, 108, 133.75])
+        _append_prices(swings, [120, 128, 110, 120, 100])
+        _append_prices(swings, [115, 105, 125, 112, 130], final_macd=5)
         state = _run_candidate_state(swings, self.config)
 
         self.assertEqual(state["active"]["waves"]["1"]["internal_count"], 9)
         self.assertEqual(state["active"]["waves"]["3"]["internal_count"], 9)
         self.assertEqual(state["active"]["waves"]["5"]["subtype"], "W5_TRUNCATED")
+
+    def test_v4_instrument_specific_w5_extension_is_explicitly_blocked(self):
+        state = _run_candidate_state(
+            _through_w5(), replace(self.config, wave5_max_extension=1.50)
+        )
+        self.assertEqual(state["active"]["parent_state"], "W5_FORMING")
+        self.assertEqual(
+            state["last_reason_code"],
+            "W5_EXTENSION_REQUIRES_INSTRUMENT_RULE",
+        )
 
     def test_public_api_exports_raw_main_and_lifecycle_fields(self):
         closes = [
@@ -911,6 +951,41 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         ):
             self.assertIn(column, result.columns)
         self.assertEqual(result.attrs["elliott_wave_state"]["engine"], "Candidate State")
+
+    def test_v4_locked_nine_degree_router_runs_independent_counts(self):
+        closes = [100 + ((index % 8) - 4) * 3 + index * 0.4 for index in range(80)]
+        candles = pd.DataFrame(
+            {
+                "high": [value + 1.0 for value in closes],
+                "low": [value - 1.0 for value in closes],
+                "close": closes,
+            },
+            index=pd.date_range("2025-01-01", periods=len(closes), freq="D"),
+        )
+        frames = {route.timeframe: candles.copy() for route in ELLIOTT_DEGREE_ROUTES}
+        results = compute_elliott_waves_multi_degree(
+            frames,
+            replace(
+                self.config,
+                min_swing_atr_multiple=0.0,
+                min_swing_range_pct=0.0,
+                important_atr_multiple=0.0,
+                wave1_start_mode="Off",
+                base_oscillator_mode="Off",
+                degree_retrace=0.10,
+            ),
+        )
+        self.assertEqual(tuple(results), ("M", "W", "D", "288", "240", "60", "15", "5", "3"))
+        self.assertIsNot(results["D"], results["240"])
+        self.assertEqual(results["60"].attrs["elliott_degree_route"]["parent"], "240")
+        self.assertEqual(results["60"].attrs["elliott_degree_route"]["context_parent"], "288")
+        self.assertEqual(results["3"].attrs["elliott_degree_route"]["pivot_length"], 15)
+        for result in results.values():
+            self.assertIn("ew_parent_alignment", result)
+            self.assertLessEqual(len(result), 5000)
+
+        with self.assertRaisesRegex(ValueError, "missing locked routes"):
+            compute_elliott_waves_multi_degree({"D": candles}, self.config)
 
     def test_rsi_seed_waits_for_full_change_window(self):
         candles = pd.DataFrame(

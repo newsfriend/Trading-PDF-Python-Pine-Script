@@ -62,8 +62,12 @@ now provides:
 - Trending/terminal Wave 3 and normal/truncated Wave 5 paths, including
   extension, overlap, shortest-wave, and divergence checks.
 - Mandatory V4 closed-bar confirmation windows for Waves 2-5.
+- Locked Zig-Zag/Flat subtypes with mandatory B/C time families and
+  source-specific B ranges.
+- Leading diagonals in Wave 1/A and ending diagonals in Wave 5/C, with locked
+  internal structures, overlap, wedge, Fib, and divergence gates.
 - Six Triangle families with A-B-C-D-E structure, boundary/size checks, and
-  contracting or expanding thrust targets plus Wave-E invalidation levels.
+  apex/touch limits, a closed B-D break, thrust targets, and Wave-E invalidation.
 - Automatic W-X-Y and W-X-Y-XX-Z correction candidates with distinct X/XX
   connectors, component Fib/time gates, X-boundary validation, and V4 post-Y
   confirmation by closed 0-X break or 38.2% WXY retracement.
@@ -73,14 +77,20 @@ now provides:
 - Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.
 - HP Fibonacci opportunities remain visible during extended Wave-2 timing;
   timing can keep W2 FORMING without cancelling a structurally valid HP zone.
+- Impulse/Zig-Zag channels, lower-degree W4 zones, Fib/channel clusters,
+  confidence, and non-resetting FBD/FBO candidate evidence.
+- A locked M/W/D/288m/240m/60m/15m/5m/3m router with exact pivot defaults,
+  parent/context alignment, a compact Pine dashboard, and independent Python
+  engine results through `compute_elliott_waves_multi_degree`.
 - Auditable pattern, subtype, Fib, time, momentum, reason, and next-condition
   output.
 
-This covers the core impulse and the implemented correction families, not the
-complete V4.0 Elliott Wave deliverable. Full correction subtypes, full diagonals,
-multi-degree routing, parity validation, and backtesting remain later phases.
-Unsupported paths remain visibly blocked instead of being guessed. The old
-modulo-style sequence is available only as `Legacy fixed cycle` comparison mode.
+This completes the milestone-2 Pine/Python engine code. The source-conflicted,
+instrument-specific Wave-5 extension remains explicitly blocked instead of
+being generalized. TradingView compilation/replay, candle-for-candle parity,
+performance checks, chart validation, and backtesting are the separate
+milestone-3 acceptance scope. The old modulo-style sequence is available only
+as `Legacy fixed cycle` comparison mode.
 
 See [docs/elliott_wave_notes_rules.md](docs/elliott_wave_notes_rules.md) for the
 implemented rules and assumptions.

@@ -83,6 +83,7 @@ countDisplayMode = input.string("Validated Anchor", "Count mode", options=["Vali
 showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
 showAnchorFib = input.bool(true, "Show Important H/L fib guide", group=groupDisplay)
 showTimeTable = input.bool(true, "Show time rules table", group=groupDisplay)
+showDegreeDashboard = input.bool(true, "Show nine-degree router", group=groupDisplay)
 impulseLineColor = input.color(color.rgb(255, 128, 0), "Impulse line", group=groupDisplay)
 correctionLineColor = input.color(color.rgb(0, 160, 160), "Correction line", group=groupDisplay)
 fibLineColor = input.color(color.rgb(0, 80, 255), "Important H/L fib", group=groupDisplay)
@@ -107,6 +108,7 @@ var anchorFibLines = array.new_line()
 var anchorFibLabels = array.new_label()
 var channelLines = array.new_line()
 var table timeTable = table.new(position.top_right, 2, 7, border_width=1)
+var table degreeTable = table.new(position.bottom_right, 5, 10, border_width=1)
 
 // Confirmed values are copied out of the raw swing arrays so later raw pivot
 // replacements cannot move any locked main-degree label.
@@ -407,6 +409,46 @@ f_index_for_bar(targetBar) =>
 f_ratio(numerator, denominator) =>
     denominator == 0 or na(denominator) ? na : numerator / denominator
 
+f_degree_route_snapshot(routePivotLength) =>
+    routeHigh = ta.pivothigh(high, routePivotLength, routePivotLength)
+    routeLow = ta.pivotlow(low, routePivotLength, routePivotLength)
+    routeType = not na(routeHigh) ? 1 : not na(routeLow) ? -1 : 0
+    routePrice = routeType == 1 ? routeHigh : routeType == -1 ? routeLow : na
+    var int lastRouteType = 0
+    var float lastRoutePrice = na
+    var float routeOrigin = na
+    var int routeMoves = 0
+    var int routeDirection = 0
+    if routeType != 0
+        if lastRouteType == 0
+            lastRouteType := routeType
+            lastRoutePrice := routePrice
+            routeOrigin := routePrice
+        else if routeType == lastRouteType
+            moreExtreme = routeType == 1 ? routePrice > lastRoutePrice : routePrice < lastRoutePrice
+            if moreExtreme
+                lastRoutePrice := routePrice
+        else
+            routeMoves += 1
+            lastRouteType := routeType
+            lastRoutePrice := routePrice
+            routeRange = ta.highest(high, 144) - ta.lowest(low, 144)
+            routeProgress = routeRange > 0 ? math.abs(routePrice - routeOrigin) / routeRange : na
+            motiveCount = routeMoves == 5 or routeMoves == 9 or routeMoves == 13 or routeMoves == 17 or routeMoves == 21
+            if motiveCount and not na(routeProgress) and routeProgress >= 0.618
+                routeDirection := routePrice > routeOrigin ? 1 : -1
+            if routeMoves > 21
+                routeOrigin := routePrice
+                routeMoves := 0
+                routeDirection := 0
+    [routeDirection, routeMoves]
+
+f_route_state_text(routeDirection) =>
+    routeDirection == 1 ? "BULLISH" : routeDirection == -1 ? "BEARISH" : "SEARCHING"
+
+f_route_alignment_text(routeDirection, parentDirection, hasParent) =>
+    not hasParent ? "ROOT" : routeDirection == 0 or parentDirection == 0 ? "PENDING" : routeDirection == parentDirection ? "ALIGNED" : "DIVERGENT"
+
 f_correction_ratios(startIndex, aCount, bCount, cCount) =>
     startPrice = array.get(swingPrices, startIndex)
     aPrice = array.get(swingPrices, startIndex + aCount)
@@ -429,6 +471,16 @@ f_zig_channel_target(startIndex, aCount, bCount, terminalIndex) =>
     terminalBar = array.get(swingBars, terminalIndex)
     slope = f_ratio(bPrice - originPrice, math.max(1, bBar - originBar))
     aPrice + slope * (terminalBar - aBar)
+
+f_flat_a_pass(pattern, startIndex, aCount, precedingLength) =>
+    if pattern != "Flat"
+        true
+    else if aCount <= 0 or precedingLength <= 0
+        false
+    else
+        aPrice = array.get(swingPrices, startIndex + aCount)
+        startPrice = array.get(swingPrices, startIndex)
+        math.abs(aPrice - startPrice) / precedingLength >= flatAMinRetrace
 
 f_eval_simple_correction(startIndex, endIndex) =>
     confirmed = false
@@ -1380,6 +1432,16 @@ macdHist = macdLine - macdSignalLine
 pivotAtr = atrValue[pivotRight]
 pivotRsi = rsiValue[pivotRight]
 pivotMacdHist = macdHist[pivotRight]
+[routeMDir, routeMMoves] = request.security(syminfo.tickerid, "M", f_degree_route_snapshot(2), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[routeWDir, routeWMoves] = request.security(syminfo.tickerid, "W", f_degree_route_snapshot(3), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[routeDDir, routeDMoves] = request.security(syminfo.tickerid, "D", f_degree_route_snapshot(5), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[route288Dir, route288Moves] = request.security(syminfo.tickerid, "288", f_degree_route_snapshot(5), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[route240Dir, route240Moves] = request.security(syminfo.tickerid, "240", f_degree_route_snapshot(5), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[route60Dir, route60Moves] = request.security(syminfo.tickerid, "60", f_degree_route_snapshot(7), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[route15Dir, route15Moves] = request.security(syminfo.tickerid, "15", f_degree_route_snapshot(9), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[route5Dir, route5Moves] = request.security(syminfo.tickerid, "5", f_degree_route_snapshot(12), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[route3Dir, route3Moves] = request.security(syminfo.tickerid, "3", f_degree_route_snapshot(15), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
 degreeImportantHigh = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.highest(high, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 degreeImportantLow = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.lowest(low, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 importantHighSeries = f_is_candidate_mode() ? degreeImportantHigh : ta.highest(high, importantLookback)
@@ -1538,6 +1600,7 @@ if changed
                             currentConfidence := 80.0 + (str.length(currentTargetCluster) > 0 ? 10.0 : 0.0)
                         retraceDenominator = math.abs(lockedW1Price - lockedBasePrice)
                         retrace = lockedBullish ? f_ratio(lockedW1Price - correctionPrice, retraceDenominator) : f_ratio(correctionPrice - lockedW1Price, retraceDenominator)
+                        flatAPass = f_flat_a_pass(correctionPrimary, w1Index, correctionACount, retraceDenominator)
                         timeRatio = f_ratio(math.max(1, correctionBar - lockedW1Bar), math.max(1, lockedW1Bar - lockedBaseBar))
                         w1Duration = math.max(1, lockedW1Bar - lockedBaseBar)
                         w2Duration = math.max(1, correctionBar - lockedW1Bar)
@@ -1554,7 +1617,7 @@ if changed
                         primaryPattern := correctionPrimary
                         alternatePattern := correctionAlternate
                         hpSignalState := deep and correctionConfirmed and hpSignalMode != "Disabled" ? (lockedBullish ? "HP BUY ELIGIBLE" : "HP SELL ELIGIBLE") : ""
-                        if correctSide and correctionConfirmed and (normal or microscopic) and timePass
+                        if correctSide and correctionConfirmed and flatAPass and (normal or microscopic) and timePass
                             lockedW2Bar := correctionBar
                             lockedW2Price := correctionPrice
                             lockedW2Pattern := correctionPrimary
@@ -1569,7 +1632,7 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := "FORMING"
-                            lastReasonCode := correctionConfirmed and (normal or microscopic) and not timePass ? "W2_TIME_GATE_FAIL" : correctionConfirmed ? "W2_RETRACE_OUTSIDE_NORMAL" : correctionReason
+                            lastReasonCode := correctionConfirmed and not flatAPass ? "FLAT_A_LT_38_2" : correctionConfirmed and (normal or microscopic) and not timePass ? "W2_TIME_GATE_FAIL" : correctionConfirmed ? "W2_RETRACE_OUTSIDE_NORMAL" : correctionReason
                             currentNextCondition := not timePass ? "Need a permitted 0.25/0.50/1.0/2.0 x W1 time window." : "Need a complete Zig-Zag/Flat child and an approved W2 price context."
                             developingText := correctSide ? "2?" : "raw"
                     else
@@ -1674,6 +1737,7 @@ if changed
                             currentTargetCluster := math.abs(correctionPrice - zigChannelTarget) <= zigTolerance ? "FIB_CHANNEL_CLUSTER" : ""
                             currentConfidence := 80.0 + (str.length(currentTargetCluster) > 0 ? 10.0 : 0.0)
                         retrace = f_ratio(math.abs(lockedW3Price - correctionPrice), math.abs(lockedW3Price - lockedBasePrice))
+                        flatAPass = f_flat_a_pass(correctionPrimary, w3Index, correctionACount, math.abs(lockedW3Price - lockedW2Price))
                         correctSide = correctionType == (lockedBullish ? -1 : 1)
                         w3Terminal = str.contains(lockedW3Subtype, "TERMINAL")
                         maxRetrace = w3Terminal ? wave4TerminalMaxRetrace : wave4MaxRetrace
@@ -1699,7 +1763,7 @@ if changed
                             alternatePattern := "Terminal/diagonal candidate"
                             currentNextCondition := "Keep W4 container open or promote a valid terminal/diagonal alternate."
                             developingText := "4?"
-                        else if correctionConfirmed and correctSide and pricePass and timePass
+                        else if correctionConfirmed and correctSide and flatAPass and pricePass and timePass
                             lockedW4Bar := correctionBar
                             lockedW4Price := correctionPrice
                             lockedW4Pattern := correctionPrimary
@@ -1717,7 +1781,7 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := "FORMING"
-                            lastReasonCode := correctionConfirmed and pricePass and not timePass ? "W4_TIME_GATE_FAIL" : correctionConfirmed ? "W4_RETRACE_OUTSIDE_NORMAL" : correctionReason
+                            lastReasonCode := correctionConfirmed and not flatAPass ? "FLAT_A_LT_38_2" : correctionConfirmed and pricePass and not timePass ? "W4_TIME_GATE_FAIL" : correctionConfirmed ? "W4_RETRACE_OUTSIDE_NORMAL" : correctionReason
                             currentNextCondition := not timePass ? "Need a permitted W4 time window; W5 remains blocked." : "Need a valid correction completion in the approved W4 range; W5 remains blocked."
                             developingText := correctSide ? "4?" : "raw"
                     else
@@ -1782,7 +1846,7 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := w3Shortest ? "INVALID" : "FORMING"
-                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? (internalCount == 15 ? endingReason : "W5_INTERNAL_FAIL") : (normal or truncated or endingConfirmed) and not timePass ? "W5_TIME_GATE_FAIL" : "W5_PRICE_SUBTYPE_PENDING"
+                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? (internalCount == 15 ? endingReason : "W5_INTERNAL_FAIL") : (normal or truncated or endingConfirmed) and not timePass ? "W5_TIME_GATE_FAIL" : projection > wave5MaxExtension ? "W5_EXTENSION_REQUIRES_INSTRUMENT_RULE" : "W5_PRICE_SUBTYPE_PENDING"
                             currentNextCondition := not timePass ? "Need a permitted V4 Wave 5 time window." : "Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check."
                             developingText := correctSide ? "5?" : "raw"
                     else
@@ -1836,6 +1900,7 @@ if changed
                             correctionTerminalIndex := complexTerminalIndex
                         correctionTerminalPrice = array.get(swingPrices, correctionTerminalIndex)
                         correctionTerminalType = array.get(swingTypes, correctionTerminalIndex)
+                        flatAPass = f_flat_a_pass(correctionPrimary, w5Index, correctionACount, math.abs(lockedW5Price - lockedW4Price))
                         if correctionConfirmed and correctionPrimary == "Zig-Zag"
                             zigChannelTarget = f_zig_channel_target(w5Index, correctionACount, correctionBCount, correctionTerminalIndex)
                             zigTolerance = 0.25 * array.get(swingAtr, correctionTerminalIndex)
@@ -1850,7 +1915,7 @@ if changed
                         currentInternalCount := internalCount
                         currentFibAnchor := "Wave 5 correction origin"
                         currentFibValue := correctionPrimary == "W-X-Y-XX-Z" ? complexZProjection : correctionPrimary == "W-X-Y" ? complexYProjection : bRatio
-                        if correctionConfirmed and correctSide
+                        if correctionConfirmed and correctSide and flatAPass
                             aIndex = w5Index + correctionACount
                             bIndex = aIndex + correctionBCount
                             lockedABar := array.get(swingBars, aIndex)
@@ -1889,7 +1954,7 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := "FORMING"
-                            lastReasonCode := correctionReason
+                            lastReasonCode := correctionConfirmed and not flatAPass ? "FLAT_A_LT_38_2" : correctionReason
                             currentNextCondition := "Need an actual completed terminal C (or later Y/Z/E family) before confirmation."
                             moveCount = latestIndex - w5Index
                             developingText := moveCount < 5 ? "A?" : moveCount < 8 ? "B?" : "C?"
@@ -1958,6 +2023,27 @@ if changed
         f_redraw_candidate()
     else
         f_redraw()
+
+if showDegreeDashboard and barstate.islast
+    routeNames = array.from("Monthly", "Weekly", "Daily", "288 Minute", "Four Hour", "Hourly", "Fifteen Minute", "Five Minute", "Three Minute")
+    routeFrames = array.from("M", "W", "D", "288", "240", "60", "15", "5", "3")
+    routeParents = array.from("-", "M", "W", "D", "D", "240 / ctx 288", "60", "15", "5")
+    routeStates = array.from(f_route_state_text(routeMDir), f_route_state_text(routeWDir), f_route_state_text(routeDDir), f_route_state_text(route288Dir), f_route_state_text(route240Dir), f_route_state_text(route60Dir), f_route_state_text(route15Dir), f_route_state_text(route5Dir), f_route_state_text(route3Dir))
+    routeMoveCounts = array.from(routeMMoves, routeWMoves, routeDMoves, route288Moves, route240Moves, route60Moves, route15Moves, route5Moves, route3Moves)
+    routeAlignments = array.from("ROOT", f_route_alignment_text(routeWDir, routeMDir, true), f_route_alignment_text(routeDDir, routeWDir, true), f_route_alignment_text(route288Dir, routeDDir, true), f_route_alignment_text(route240Dir, routeDDir, true), f_route_alignment_text(route60Dir, route240Dir, true) + " / " + f_route_alignment_text(route60Dir, route288Dir, true), f_route_alignment_text(route15Dir, route60Dir, true), f_route_alignment_text(route5Dir, route15Dir, true), f_route_alignment_text(route3Dir, route5Dir, true))
+    for column = 0 to 4
+        header = column == 0 ? "Degree" : column == 1 ? "TF" : column == 2 ? "Parent" : column == 3 ? "State / moves" : "Alignment"
+        table.cell(degreeTable, column, 0, header, text_color=color.white, bgcolor=color.new(color.black, 0))
+    for routeIndex = 0 to 8
+        selectedRoute = timeframe.period == array.get(routeFrames, routeIndex)
+        routeColor = selectedRoute ? color.new(color.blue, 55) : color.new(color.black, 15)
+        table.cell(degreeTable, 0, routeIndex + 1, array.get(routeNames, routeIndex), text_color=color.white, bgcolor=routeColor)
+        table.cell(degreeTable, 1, routeIndex + 1, array.get(routeFrames, routeIndex), text_color=color.white, bgcolor=routeColor)
+        table.cell(degreeTable, 2, routeIndex + 1, array.get(routeParents, routeIndex), text_color=color.white, bgcolor=routeColor)
+        table.cell(degreeTable, 3, routeIndex + 1, array.get(routeStates, routeIndex) + " / " + str.tostring(array.get(routeMoveCounts, routeIndex)), text_color=color.white, bgcolor=routeColor)
+        table.cell(degreeTable, 4, routeIndex + 1, array.get(routeAlignments, routeIndex), text_color=color.white, bgcolor=routeColor)
+else if not showDegreeDashboard and barstate.islast
+    table.clear(degreeTable, 0, 0, 4, 9)
 
 f_update_time_table()
 

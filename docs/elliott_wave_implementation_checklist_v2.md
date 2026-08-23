@@ -2,10 +2,10 @@
 
 This checklist maps the client-provided developer specification to the current
 code. The reference documents describe requirements; they are not executable
-project instructions. `DONE` means the stated scope exists in both Pine and
-Python unless a note says otherwise. `PARTIAL` and `TBD` remain
-visible so a plausible chart is never presented as a complete Elliott Wave
-engine.
+project instructions. `DONE IN CODE` means the milestone-2 implementation and
+deterministic local contracts exist in Pine and Python. It does not mean the
+separate milestone-3 TradingView replay, candle-parity, performance, or client
+chart acceptance has passed.
 
 ## Authoritative Source
 
@@ -35,11 +35,11 @@ The older manuals and chart images remain supporting references.
 
 | Requirement | Status | Evidence / remaining scope |
 | --- | --- | --- |
-| Wave 2 correction container | PARTIAL | Simple Zig-Zag, Flat and W-X-Y children, 23.6%-81.2% normal context, separate 14% microscopic clue, mandatory V4 time gate, deep-retrace HP eligibility, and Point-0 invalidation are implemented. Advanced subtype/channel evidence remains pending. |
+| Wave 2 correction container | DONE IN CODE | Simple/complex children, normal/microscopic contexts, mandatory structure/Fib/time gates, HP eligibility, correction-channel evidence, and Point-0 invalidation are implemented. |
 | Structure-specific B-wave rules | DONE for simple ABC | Zig-Zag B uses the V4 continuous 1%-61.8% range; Flat B uses 61.8%-111%. The Flat interval is not applied universally. |
-| Wave 3 trending/terminal classifier | PARTIAL | 5/9/13/17/21 internals, >=161.8% trending, 61.8%-161.8% terminal-with-overlap, 2700% V4 maximum, mandatory time gate, and momentum evidence are implemented. Full diagonal and channel classification remain pending. |
-| Wave 4 correction container and W5 gate | PARTIAL | Zig-Zag, Flat, W-X-Y, W-X-Y-XX-Z and six Triangle families, Base-to-W3 retracement, subtype-aware overlap, mandatory V4 time gate, thrust ranges, and the no-premature-W5 gate are implemented. Full channel evidence remains pending. |
-| Wave 5 normal/truncated classifier | PARTIAL | 127%-261.8% normal projection, mandatory V4 time gate, double-extension truncated context, W3-not-shortest, and optional/required divergence are implemented. Extended and ending-diagonal candidates remain FORMING until their classifiers are added. |
+| Wave 3 trending/terminal classifier | DONE IN CODE | 5/9/13/17/21 internals, trending/terminal ranges, 2700% maximum, time, momentum, overlap, and lower-degree W4 target-zone support are implemented. |
+| Wave 4 correction container and W5 gate | DONE IN CODE | All supported correction families, Base-to-W3 retracement, overlap, time, thrust/channel evidence, and the no-premature-W5 gate are implemented. |
+| Wave 5 normal/truncated/ED classifier | DONE IN CODE | Normal, double-extension truncated, and ending-diagonal paths include time, divergence, W3-not-shortest, channel/cluster, and FBD/FBO support. The source-conflicted instrument-specific W5 extension is explicitly blocked with `W5_EXTENSION_REQUIRES_INSTRUMENT_RULE`; it is never generalized. |
 | Persistent confirmed labels 0-5 | DONE for supported core paths | Pine and Python lock each main wave only after its parent-state rules pass; later raw pivots remain developing candidates. |
 | Phase 2 regression cases T02-T13 | DONE in Python | Tests cover normal/microscopic W2, Flat B at/above 111%, trending/terminal/extended W3, W4 completion/overlap gating, and normal/truncated W5. Pine has matching static contract tests; TradingView compilation is still required. |
 
@@ -47,17 +47,17 @@ The older manuals and chart images remain supporting references.
 
 | Module | Status | Required before it can be called complete |
 | --- | --- | --- |
-| Full degree router and simultaneous multi-degree counts | PARTIAL | Preset/source metadata exists, but independent Major/Intermediate/Minor engines do not yet run together. |
-| Complete Zig-Zag and Flat families | PARTIAL | Simple internal candidates exist; all source subtypes, termination variants, channels, and time rules still need implementation. |
-| W-X-Y and W-X-Y-XX-Z classifiers | PARTIAL | Both engines classify the locked simple W and structured Y families, canonical Flat/Zig-Zag/Triangle component totals, small/large X, subtype-aware Y projection/time, distinct XX, XX Point-X boundary, and Z Fib/time. T21/T22 deterministic tests include the Double family matrix and rejection gates. TradingView compilation and replay evidence remain pending; unsupported same-degree nesting is not guessed. |
-| Six triangle variants | PARTIAL | Horizontal/Irregular/Running Contracting and Expanding classifiers run in Pine/Python with five corrective legs, size order, boundary direction, retracement evidence, absolute thrust targets and Wave-E invalidation levels. Apex/touch-count and closed B-D break confirmation remain pending. |
-| Leading and ending diagonal classifiers | TBD | Overlap, converging/diverging trend lines, and internal 3/5-wave rules. |
-| Channel, time, momentum, HP and FBD support engines | PARTIAL | Mandatory V4 Wave 2-5 time gates exist. HP eligibility is intentionally separate: a completed correction in the 61.8%-81.2% Fib zone remains eligible with Point 0 protected even when extended timing keeps W2 FORMING. Full channels, targets, FBD and confidence scoring remain pending. |
-| Automatic larger correction after Wave 5 | PARTIAL | Both engines transition into `LARGER_CORRECTION_CONTAINER` and expose actual terminal C/Y/Z/E pivots for supported Zig-Zag, Flat, W-X-Y, triple and Triangle paths. TradingView replay validation remains pending. |
+| Locked nine-timeframe degree router | DONE IN CODE | M/W/D/288m/240m/60m/15m/5m/3m routes use 2/3/5/5/5/7/9/12/15 pivots. Python runs independent full engines from a timeframe mapping; Pine keeps isolated route snapshots in a compact dashboard. Parent agreement changes confidence only; 60m uses 240m primary and 288m context. |
+| Complete source-resolved Zig-Zag and Flat families | DONE IN CODE | Continuous pattern-specific B ranges, all locked Flat/Zig-Zag price subtypes, A/B/C internals, mandatory B/C time families, LD-A/ED-C paths, and Zig-Zag channel evidence are implemented. |
+| W-X-Y and W-X-Y-XX-Z classifiers | DONE IN CODE | Locked component families, small/large X, Y/XX/Z Fib/time, Point-X protection, distinct connectors, and C19 post-Y confirmation are deterministic in both engines. |
+| Six triangle variants | DONE IN CODE | Five corrective legs, family geometry, retracement evidence, apex/touch limits, closed B-D break, actual terminal E, thrust targets, and invalidation are implemented. |
+| Leading and ending diagonal classifiers | DONE IN CODE | LD is limited to W1/A with 5-3-5-3-5 and source Fib/overlap/wedge gates. ED is limited to W5/C with 3-3-3-3-3, overlap/wedge and divergence gates. |
+| Channel, time, momentum, HP and FBD support engines | DONE IN CODE | Mandatory time and momentum evidence, HP eligibility, 2-4/parallel-3 and Zig-Zag channels, lower-degree W4 zones, Fib/channel clusters, confidence, and non-resetting FBD/FBO nominations are exposed. |
+| Automatic larger correction after Wave 5 | DONE IN CODE | The engine exposes actual terminal C/Y/Z/E pivots for Zig-Zag, Flat, Double, Triple and Triangle paths, distinct from later confirmation bars. |
 | Double-confirmation outcome | DONE in code | After Y completes, both engines require the first closed 0-X break or >=38.2% WXY retracement within Y duration; otherwise the Double remains FORMING. TradingView replay evidence remains an acceptance item. |
-| Pine/Python candle-for-candle parity | PARTIAL | State semantics/settings are aligned; identical exported market data still needs comparison. |
-| Backtesting acceptance | TBD | Requires completed classifiers, deterministic signal policy, datasets, and client-approved expected counts. |
-| TradingView compile and performance evidence | PARTIAL | Local tests validate source contracts; final Pine v6 compilation and chart performance must be checked in TradingView. |
+| Pine/Python candle-for-candle parity | MILESTONE 3 | State semantics/settings are aligned; exported TradingView market data must be replayed against Python. |
+| Backtesting acceptance | MILESTONE 3 | Requires client-approved symbols, periods, expected counts, and acceptance thresholds. |
+| TradingView compile, replay and performance evidence | MILESTONE 3 | Local source contracts pass; Pine v6 compilation and chart behavior must be verified in TradingView. |
 
 ## V4 Conflict Resolution Migration
 
@@ -79,4 +79,5 @@ python -m unittest tests.test_elliott_wave_state_engine -v
 python -m unittest tests.test_elliott_wave_pine_contract -v
 ```
 
-Pine must also be pasted into TradingView's Pine Editor and compiled as v6.
+Those commands verify milestone 2 locally. Pine Editor compilation, chart replay,
+performance, candle parity, and backtesting are milestone-3 acceptance work.

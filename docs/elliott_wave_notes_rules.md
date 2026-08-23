@@ -37,6 +37,7 @@ The core impulse implementation then provides:
 
 - Wave 2 as a correction container, not a single retracement label;
 - parallel simple Zig-Zag and Flat candidates with pattern-specific B rules;
+- all locked simple-correction price subtypes plus mandatory B/C time families;
 - separate normal and microscopic Wave 2 contexts;
 - trending and terminal Wave 3 paths with extension/source-maximum checks;
 - Wave 4 correction completion and subtype-aware overlap checks;
@@ -44,7 +45,8 @@ The core impulse implementation then provides:
 - normal and double-extension/truncated Wave 5 paths;
 - mandatory V4 closed-bar time windows for Waves 2, 3, 4, and 5;
 - all six contracting/expanding Triangle families with five-leg validation and
-  subtype-specific thrust ranges (never enabled for Wave 2); and
+  subtype-specific thrust ranges, apex/touch limits, and a closed B-D break
+  (never enabled for Wave 2); and
 - absolute near/far triangle thrust targets plus the Wave-E invalidation price,
   exported by Python and drawn as Pine chart levels;
 - W-X-Y classification with small/large X, W/4-W/3-W/2 X timing, subtype-aware
@@ -53,6 +55,11 @@ The core impulse implementation then provides:
   retracement, Point-X boundary protection, and independent Y/XX/Z time/Fib
   evidence; and
 - W3-not-shortest and configurable W3/W5 divergence checks; and
+- leading diagonals only in Wave 1/A and ending diagonals only in Wave 5/C;
+- impulse/Zig-Zag channels, lower-degree W4 targets, Fib/channel clusters,
+  confidence, and non-resetting FBD/FBO candidate evidence; and
+- the exact nine-timeframe router with parent/context alignment used only as
+  confidence evidence; and
 - an audit trail containing parent state, pattern, subtype, Fib anchor/value,
   internal structure, momentum, reason code, and next condition.
 
@@ -82,28 +89,29 @@ Python preserves `ew_raw_*` fields and exports separate main/state fields,
 including `ew_label`, `ew_parent_state`, `ew_primary_pattern`,
 `ew_alternate_pattern`, `ew_subtype`, `ew_reason_code`, `ew_source_rule_id`,
 `ew_fib_anchor`, `ew_fib_value`, `ew_time_value`, `ew_macd_state`,
-`ew_internal_pattern`, `ew_hp_signal`, and `ew_next_condition`.
+`ew_internal_pattern`, `ew_hp_signal`, `ew_channel_type`,
+`ew_channel_target`, `ew_target_cluster`, `ew_fbd_candidate`,
+`ew_support_evidence`, and `ew_next_condition`.
 
 Pine draws locked labels 0-5 and A-B-C, W-X-Y, W-X-Y-XX-Z, or A-B-C-D-E for supported paths and shows the same parent
 state, pattern, evidence, reason, recount, and next-condition diagnostics in its
 panel. Raw pivots that have not passed a parent gate are shown only as small
 developing labels.
 
-## Explicit Scope Boundary
+## Milestone Boundary
 
-The current update covers the core impulse plus the current simple, double,
-triple and triangle correction classifiers, not the entire V4.0 deliverable. Full
-leading/ending diagonals, simultaneous multi-degree routing, channel engines,
-full time/HP/FBD scoring, parity validation, and backtesting remain later work.
-Unsupported extended/diagonal Wave 5 candidates remain FORMING or INVALID and
-are never promoted by pivot order.
+The milestone-2 Pine/Python engine implementation is complete. The
+instrument-specific Wave-5 extension conflict remains visibly blocked with
+`W5_EXTENSION_REQUIRES_INSTRUMENT_RULE`; the source explicitly forbids a
+universal rule. TradingView compilation/replay, candle-for-candle parity,
+performance, chart review, and backtesting remain milestone-3 acceptance work.
 
 `Legacy fixed cycle` remains selectable for historical visual comparison. It is
 not an acceptance mode.
 
 See
 [elliott_wave_implementation_checklist_v2.md](elliott_wave_implementation_checklist_v2.md)
-for the exact `DONE`, `PARTIAL`, `TBD`, and `TBD-BLOCKED` status.
+for the exact milestone-2 code status and milestone-3 acceptance boundary.
 
 ## Files
 
