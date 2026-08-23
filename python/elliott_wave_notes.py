@@ -5,9 +5,10 @@ Elliott labels are emitted by a persistent candidate lifecycle so that a new
 minor pivot cannot advance or restart the main-degree count by itself.
 
 The source-locked candidate engine implements the P0 foundation, the core
-Wave 1-5 impulse sequence, and the mandatory transition into a larger A-B-C
-correction container. Labels are promoted only after their structure gates
-pass; raw pivots never advance the main count by position or modulo arithmetic.
+Wave 1-5 impulse sequence, and the mandatory transition into a parallel larger
+correction container (A-B-C, W-X-Y, W-X-Y-XX-Z or Triangle). Labels are
+promoted only after their structure gates pass; raw pivots never advance the
+main count by position or modulo arithmetic.
 """
 
 from __future__ import annotations
@@ -240,7 +241,13 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         count < 5 or count % 4 != 1 for count in cfg.w1_internal_move_counts
     ):
         raise ValueError("w1_internal_move_counts must use the 5/9/13/17/21 (+4) sequence")
-    valid_patterns = {"A-B-C", "W-X-Y", "W-X-Y-X-Z", "A-B-C-D-E"}
+    valid_patterns = {
+        "A-B-C",
+        "W-X-Y",
+        "W-X-Y-X-Z",  # legacy display alias
+        "W-X-Y-XX-Z",
+        "A-B-C-D-E",
+    }
     if cfg.correction_pattern not in valid_patterns:
         raise ValueError(f"correction_pattern must be one of {sorted(valid_patterns)}")
     valid_start_modes = {"Off", "Important swing", "Important swing + oscillator"}
@@ -580,10 +587,10 @@ def _compute_candidate_state(
         "alternate_base_count": lifecycle["alternate_count"],
         "last_reason_code": lifecycle["last_reason_code"],
         "pending_modules": [
-            "double/triple and triangle correction families",
             "full diagonal classifier",
             "full multi-degree routing",
-            "owner-blocked conflict decisions",
+            "channel and supporting evidence engines",
+            "TradingView/Python parity validation",
         ],
     }
     return result
@@ -740,7 +747,9 @@ def _run_candidate_state(
                     and swing.important_extreme
                     and _oscillator_evidence(swings, swing_index, active["bullish"], cfg)[0]
                 )
-                transition = _advance_impulse_state(active, swings, swing_index, cfg)
+                transition = _advance_impulse_state(
+                    active, swings, swing_index, cfg, source=source
+                )
                 if alternate and transition["status"] != "CONFIRMED":
                     alternate_count += 1
                     transition["alternate_pattern"] = "Alternate base"
@@ -921,6 +930,8 @@ def _advance_impulse_state(
     swings: list[_Swing],
     end_idx: int,
     cfg: ElliottWaveConfig,
+    *,
+    source: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     state = str(active["parent_state"])
     bullish = bool(active["bullish"])
@@ -928,10 +939,13 @@ def _advance_impulse_state(
 
     if state == "W2_CORRECTION_CONTAINER":
         start_idx = int(waves["1"]["swing_idx"])
-        correction = _evaluate_correction(swings, start_idx, end_idx, cfg)
+        correction = _evaluate_correction(
+            swings, start_idx, end_idx, cfg, source=source
+        )
+        terminal_idx = int(correction.get("terminal_index", end_idx))
         p0 = swings[int(waves["0"]["swing_idx"])]
         p1 = swings[start_idx]
-        p2 = swings[end_idx]
+        p2 = swings[terminal_idx]
         correct_side = p2.kind == (-1 if bullish else 1)
         retrace = _directional_retrace(p0.price, p1.price, p2.price, bullish)
         time_ratio = _duration_ratio(p1, p2, p0, p1)
@@ -957,7 +971,7 @@ def _advance_impulse_state(
 
         if correct_side and correction["confirmed"] and (normal or microscopic) and time_gate:
             record = _make_wave_record(
-                swing_idx=end_idx,
+                swing_idx=terminal_idx,
                 pattern=str(correction["primary"]),
                 subtype=subtype,
                 reason_code="W2_CONFIRMED",
@@ -1132,8 +1146,15 @@ def _advance_impulse_state(
         p3 = swings[int(waves["3"]["swing_idx"])]
         p4 = swings[end_idx]
         correction = _evaluate_correction(
-            swings, int(waves["3"]["swing_idx"]), end_idx, cfg, allow_triangle=True
+            swings,
+            int(waves["3"]["swing_idx"]),
+            end_idx,
+            cfg,
+            allow_triangle=True,
+            source=source,
         )
+        terminal_idx = int(correction.get("terminal_index", end_idx))
+        p4 = swings[terminal_idx]
         correct_side = p4.kind == (-1 if bullish else 1)
         retrace = _safe_ratio(abs(p3.price - p4.price), abs(p3.price - p0.price))
         w3_terminal = "TERMINAL" in str(waves["3"]["subtype"])
@@ -1197,7 +1218,7 @@ def _advance_impulse_state(
                 else "W4_NORMAL" if not w3_terminal else "W4_TERMINAL_CONTEXT"
             )
             record = _make_wave_record(
-                swing_idx=end_idx,
+                swing_idx=terminal_idx,
                 pattern=str(correction["primary"]),
                 subtype=w4_subtype,
                 reason_code="W4_CONFIRMED",
@@ -1372,13 +1393,20 @@ def _advance_impulse_state(
     if state == "LARGER_CORRECTION_CONTAINER":
         start_idx = int(waves["5"]["swing_idx"])
         correction = _evaluate_correction(
-            swings, start_idx, end_idx, cfg, allow_triangle=True
+            swings,
+            start_idx,
+            end_idx,
+            cfg,
+            allow_triangle=True,
+            source=source,
         )
-        terminal = swings[end_idx]
+        terminal_idx = int(correction.get("terminal_index", end_idx))
+        terminal = swings[terminal_idx]
         correct_side = terminal.kind == (-1 if bullish else 1)
         if correction["confirmed"] and correct_side:
             endpoint_indices = correction["endpoint_indices"]
             terminal_labels = correction["labels"]
+            fib_values = correction.get("fib_values", {})
             for label, endpoint_idx in zip(terminal_labels, endpoint_indices):
                 endpoint = swings[int(endpoint_idx)]
                 waves[label] = _make_wave_record(
@@ -1392,13 +1420,7 @@ def _advance_impulse_state(
                         f"{endpoint.confirmed_index}."
                     ),
                     fib_anchor="Wave 5 correction origin",
-                    fib_value=(
-                        float(correction["b_ratio"])
-                        if label == "B"
-                        else float(correction["c_vs_a"])
-                        if label == "C"
-                        else np.nan
-                    ),
+                    fib_value=float(fib_values.get(label, np.nan)),
                     internal_pattern=str(correction["internal_pattern"]),
                     internal_count=int(correction["leg_counts"][label]),
                     alternate=str(correction["alternate"]),
@@ -1423,7 +1445,7 @@ def _advance_impulse_state(
             active["next_condition"] = f"The 1-2-3-4-5 then {terminal_sequence} cycle is complete; wait for the next qualified Point 0."
             return _transition(
                 status="CONFIRMED",
-                candidate_label="C",
+                candidate_label=str(terminal_labels[-1]),
                 pattern=str(correction["primary"]),
                 subtype="LARGER_CORRECTION_COMPLETE",
                 reason_code="CORRECTION_COMPLETE",
@@ -1435,13 +1457,16 @@ def _advance_impulse_state(
                 source_rule_id="V4-C10-C16-LARGER-CORRECTION",
                 alternate_pattern=str(correction["alternate"]),
                 fib_anchor="Wave 5 correction origin",
-                fib_value=float(correction["c_vs_a"]),
+                fib_value=float(correction.get("terminal_fib_value", np.nan)),
                 internal_pattern=str(correction["internal_pattern"]),
                 internal_count=int(correction["internal_count"]),
             )
 
-        candidate_label = _larger_correction_candidate_label(
-            end_idx - start_idx, cfg
+        candidate_label = str(
+            correction.get(
+                "developing_label",
+                _larger_correction_candidate_label(end_idx - start_idx, cfg),
+            )
         )
         return _transition(
             candidate_label=candidate_label,
@@ -1477,20 +1502,476 @@ def _evaluate_correction(
     cfg: ElliottWaveConfig,
     *,
     allow_triangle: bool = False,
+    source: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     """Run permitted correction families in parallel and rank hard-valid results."""
 
     simple = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
+    double = _evaluate_double_correction(
+        swings,
+        start_idx,
+        end_idx,
+        cfg,
+        allow_triangle=allow_triangle,
+        source=source,
+    )
+    triple = (
+        _evaluate_triple_correction(swings, start_idx, end_idx, cfg)
+        if allow_triangle
+        else None
+    )
+    candidates = [candidate for candidate in (triple, double) if candidate is not None]
+    if allow_triangle:
+        triangle = _evaluate_triangle_correction(swings, start_idx, end_idx)
+        candidates.append(triangle)
+    candidates.append(simple)
+
+    confirmed = [candidate for candidate in candidates if candidate["confirmed"]]
+    if confirmed:
+        primary = confirmed[0]
+        alternates = [
+            str(candidate["primary"])
+            for candidate in confirmed[1:]
+            if candidate["primary"] != primary["primary"]
+        ]
+        if alternates:
+            primary["alternate"] = " | ".join(dict.fromkeys(alternates))
+        return _with_correction_defaults(primary, end_idx)
+
+    progressed = [
+        candidate
+        for candidate in candidates
+        if int(candidate.get("progress_score", 0)) > 0
+    ]
+    forming = max(
+        progressed,
+        key=lambda candidate: int(candidate.get("progress_score", 0)),
+    ) if progressed else simple
+    alternates = [
+        str(candidate["primary"])
+        for candidate in candidates
+        if candidate is not forming and int(candidate.get("progress_score", 0)) > 0
+    ]
+    if alternates:
+        forming["alternate"] = " | ".join(dict.fromkeys(alternates))
+    return _with_correction_defaults(forming, end_idx)
+
+
+def _with_correction_defaults(
+    candidate: dict[str, object], end_idx: int
+) -> dict[str, object]:
+    """Normalize the shared correction result contract for every family."""
+
+    candidate.setdefault("terminal_index", end_idx)
+    candidate.setdefault("confirmation_index", end_idx)
+    candidate.setdefault("terminal_fib_value", candidate.get("c_vs_a", np.nan))
+    candidate.setdefault("fib_values", {})
+    candidate.setdefault("developing_label", "C?")
+    candidate.setdefault("progress_score", 0)
+    candidate.setdefault("thrust_target_near", np.nan)
+    candidate.setdefault("thrust_target_far", np.nan)
+    candidate.setdefault("invalidation_price", np.nan)
+    return candidate
+
+
+def _component_total_counts(cfg: ElliottWaveConfig) -> tuple[int, ...]:
+    correction_counts = (3, 7, 11)
+    totals = {
+        a + b + c
+        for a in (*cfg.w1_internal_move_counts, *correction_counts)
+        for b in correction_counts
+        for c in cfg.w1_internal_move_counts
+    }
+    # V4 acceptance combinations use canonical Flat (11), Zig-Zag (13) and
+    # five-leg/extended component (15) containers. Bounding the parent search
+    # to these totals keeps Pine/Python parity deterministic and avoids an
+    # exponential candidate explosion; nested complex children remain a later
+    # degree-router concern rather than being guessed at the same degree.
+    return tuple(total for total in (11, 13, 15) if total in totals)
+
+
+def _evaluate_component(
+    swings: list[_Swing],
+    start_idx: int,
+    end_idx: int,
+    cfg: ElliottWaveConfig,
+    *,
+    allow_triangle: bool = False,
+) -> dict[str, object]:
+    simple = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
     if allow_triangle:
         triangle = _evaluate_triangle_correction(swings, start_idx, end_idx)
         if triangle["confirmed"]:
-            if simple["confirmed"]:
-                triangle["alternate"] = str(simple["primary"])
             return triangle
-        if not simple["confirmed"]:
-            simple["alternate"] = "Triangle"
-            simple["note"] = f"{simple['note']} Triangle candidates: {triangle['note']}"
     return simple
+
+
+def _connector_classification(
+    swings: list[_Swing], start_idx: int, end_idx: int, reference_length: float
+) -> tuple[str, float]:
+    length = abs(swings[end_idx].price - swings[start_idx].price)
+    ratio = _safe_ratio(length, reference_length)
+    if np.isfinite(ratio) and 0.142 <= ratio <= 0.50:
+        return "SMALL", ratio
+    if np.isfinite(ratio) and 0.618 <= ratio <= 1.11:
+        return "LARGE", ratio
+    return "", ratio
+
+
+def _double_post_y_confirmation(
+    swings: list[_Swing],
+    start_idx: int,
+    x_idx: int,
+    y_idx: int,
+    end_idx: int,
+    source: pd.DataFrame | None = None,
+) -> tuple[bool, int, str]:
+    """Apply V3.3 C19 using closed, confirmed swing observations."""
+
+    if end_idx <= y_idx:
+        return False, y_idx, ""
+    origin = swings[start_idx]
+    x = swings[x_idx]
+    y = swings[y_idx]
+    y_duration = max(1, y.position - x.position)
+    deadline = y.position + y_duration
+    wxy_range = abs(y.price - origin.price)
+    downward = y.price < origin.price
+    line_denominator = max(1, x.position - origin.position)
+    line_slope = (x.price - origin.price) / line_denominator
+
+    observations: list[tuple[int, float, int]] = []
+    if source is not None and "close" in source:
+        first_position = max(y.position + 1, y.confirmed_position)
+        last_position = min(
+            deadline,
+            swings[end_idx].confirmed_position,
+            len(source) - 1,
+        )
+        observations.extend(
+            (position, float(source["close"].iloc[position]), end_idx)
+            for position in range(first_position, last_position + 1)
+        )
+    else:
+        observations.extend(
+            (swings[index].position, swings[index].price, index)
+            for index in range(y_idx + 1, end_idx + 1)
+            if swings[index].position <= deadline
+        )
+
+    for observed_position, observed_price, observed_index in observations:
+        retrace = _safe_ratio(
+            observed_price - y.price if downward else y.price - observed_price,
+            wxy_range,
+        )
+        line_value = origin.price + line_slope * (observed_position - origin.position)
+        trendline_break = observed_price > line_value if downward else observed_price < line_value
+        if trendline_break:
+            return True, observed_index, "0-X_CLOSED_BREAK"
+        if np.isfinite(retrace) and retrace >= 0.382:
+            return True, observed_index, "WXY_38_2_RETRACE"
+    return False, y_idx, ""
+
+
+def _evaluate_double_correction(
+    swings: list[_Swing],
+    start_idx: int,
+    end_idx: int,
+    cfg: ElliottWaveConfig,
+    *,
+    allow_triangle: bool,
+    source: pd.DataFrame | None = None,
+) -> dict[str, object]:
+    """Evaluate V4 Double Correction W-X-Y and its locked post-Y gate."""
+
+    component_counts = _component_total_counts(cfg)
+    connector_counts = (1, 3, 7, 11)
+    cache: dict[tuple[int, int, bool], dict[str, object]] = {}
+
+    def component(left: int, right: int, triangle: bool = False) -> dict[str, object]:
+        key = (left, right, triangle)
+        if key not in cache:
+            cache[key] = _evaluate_component(
+                swings, left, right, cfg, allow_triangle=triangle
+            )
+        return cache[key]
+
+    best_forming: dict[str, object] | None = None
+    for w_count in component_counts:
+        w_idx = start_idx + w_count
+        if w_idx >= end_idx:
+            continue
+        w = component(start_idx, w_idx)
+        if not w["confirmed"]:
+            continue
+        w_length = abs(swings[w_idx].price - swings[start_idx].price)
+        w_duration = max(1, swings[w_idx].position - swings[start_idx].position)
+        for x_count in connector_counts:
+            x_idx = w_idx + x_count
+            if x_idx >= end_idx:
+                continue
+            x_class, x_ratio = _connector_classification(
+                swings, w_idx, x_idx, w_length
+            )
+            x_duration = max(1, swings[x_idx].position - swings[w_idx].position)
+            x_time_pass = x_duration < w_duration and _matches_absolute_time_targets(
+                x_duration,
+                (0.25 * w_duration, w_duration / 3.0, 0.50 * w_duration),
+                cfg.time_tolerance_bars,
+            )
+            if not x_class or not x_time_pass:
+                continue
+            for y_count in component_counts:
+                y_idx = x_idx + y_count
+                if y_idx > end_idx:
+                    continue
+                y = component(x_idx, y_idx, allow_triangle)
+                if not y["confirmed"]:
+                    continue
+                y_duration = max(1, swings[y_idx].position - swings[x_idx].position)
+                y_time_pass = _matches_absolute_time_targets(
+                    y_duration,
+                    (
+                        w_duration,
+                        w_duration + x_duration,
+                        0.50 * (w_duration + x_duration),
+                    ),
+                    cfg.time_tolerance_bars,
+                )
+                y_projection = _safe_ratio(
+                    abs(swings[y_idx].price - swings[x_idx].price), w_length
+                )
+                y_max = 1.0 if w["primary"] == "Zig-Zag" and y["primary"] == "Triangle" else 2.618 if w["primary"] == "Zig-Zag" and y["primary"] == "Zig-Zag" else 1.618
+                if not (
+                    y_time_pass
+                    and np.isfinite(y_projection)
+                    and 0.618 <= y_projection <= y_max
+                ):
+                    continue
+                confirmed, confirmation_idx, confirmation_mode = _double_post_y_confirmation(
+                    swings, start_idx, x_idx, y_idx, end_idx, source
+                )
+                result = {
+                    "confirmed": confirmed,
+                    "primary": "W-X-Y",
+                    "alternate": "",
+                    "subtype": f"DOUBLE_{w['primary'].upper().replace('-', '_')}_{y['primary'].upper().replace('-', '_')}",
+                    "b_ratio": x_ratio,
+                    "c_vs_a": y_projection,
+                    "c_vs_b": np.nan,
+                    "labels": ("W", "X", "Y"),
+                    "leg_counts": {"W": w_count, "X": x_count, "Y": y_count},
+                    "endpoint_indices": (w_idx, x_idx, y_idx),
+                    "terminal_index": y_idx,
+                    "confirmation_index": confirmation_idx,
+                    "terminal_fib_value": y_projection,
+                    "fib_values": {"X": x_ratio, "Y": y_projection},
+                    "internal_pattern": f"{w['internal_pattern']} | X{x_count} | {y['internal_pattern']}",
+                    "internal_count": y_idx - start_idx,
+                    "reason_code": "DOUBLE_CONFIRMED" if confirmed else "DOUBLE_CONFIRMATION_PENDING",
+                    "developing_label": "Y?",
+                    "progress_score": 4 if confirmed else 3,
+                    "note": (
+                        f"W-X-Y {w['primary']} + {y['primary']}; X={x_ratio:.2%} ({x_class}), "
+                        f"Y={y_projection:.2%}; X/Y time gates pass. "
+                        + (
+                            f"Post-Y confirmation={confirmation_mode}."
+                            if confirmed
+                            else "Await first closed 0-X break or >=38.2% WXY retracement within Y duration."
+                        )
+                    ),
+                }
+                if confirmed:
+                    return result
+                best_forming = result
+
+    if best_forming is not None:
+        return best_forming
+    return {
+        "confirmed": False,
+        "primary": "W-X-Y",
+        "alternate": "",
+        "subtype": "DOUBLE_FORMING",
+        "b_ratio": np.nan,
+        "c_vs_a": np.nan,
+        "c_vs_b": np.nan,
+        "labels": ("W", "X", "Y"),
+        "leg_counts": {},
+        "endpoint_indices": (),
+        "internal_pattern": "W + X + Y component containers",
+        "internal_count": max(0, end_idx - start_idx),
+        "reason_code": "DOUBLE_COMPONENT_PENDING",
+        "developing_label": "W?" if end_idx - start_idx < 11 else "X?",
+        "progress_score": 0,
+        "note": "W, X or Y structure/Fib/time gates are incomplete.",
+    }
+
+
+def _evaluate_triple_correction(
+    swings: list[_Swing], start_idx: int, end_idx: int, cfg: ElliottWaveConfig
+) -> dict[str, object]:
+    """Evaluate V4 Triple Correction W-X-Y-XX-Z with distinct connectors."""
+
+    component_counts = _component_total_counts(cfg)
+    connector_counts = (1, 3, 7, 11)
+    cache: dict[tuple[int, int, bool], dict[str, object]] = {}
+
+    def component(left: int, right: int, triangle: bool = False) -> dict[str, object]:
+        key = (left, right, triangle)
+        if key not in cache:
+            cache[key] = _evaluate_component(
+                swings, left, right, cfg, allow_triangle=triangle
+            )
+        return cache[key]
+
+    for w_count in component_counts:
+        w_idx = start_idx + w_count
+        if w_idx >= end_idx:
+            continue
+        w = component(start_idx, w_idx)
+        if not w["confirmed"]:
+            continue
+        w_length = abs(swings[w_idx].price - swings[start_idx].price)
+        w_duration = max(1, swings[w_idx].position - swings[start_idx].position)
+        for x_count in connector_counts:
+            x_idx = w_idx + x_count
+            if x_idx >= end_idx:
+                continue
+            x_class, x_ratio = _connector_classification(swings, w_idx, x_idx, w_length)
+            x_duration = max(1, swings[x_idx].position - swings[w_idx].position)
+            if not x_class or not (
+                x_duration < w_duration
+                and _matches_absolute_time_targets(
+                    x_duration,
+                    (0.25 * w_duration, w_duration / 3.0, 0.50 * w_duration),
+                    cfg.time_tolerance_bars,
+                )
+            ):
+                continue
+            for y_count in component_counts:
+                y_idx = x_idx + y_count
+                if y_idx >= end_idx:
+                    continue
+                y = component(x_idx, y_idx, True)
+                if not y["confirmed"]:
+                    continue
+                y_length = abs(swings[y_idx].price - swings[x_idx].price)
+                y_projection = _safe_ratio(y_length, w_length)
+                y_duration = max(1, swings[y_idx].position - swings[x_idx].position)
+                if not (
+                    np.isfinite(y_projection)
+                    and 0.618 <= y_projection <= 1.618
+                    and _matches_absolute_time_targets(
+                        y_duration,
+                        (
+                            w_duration,
+                            w_duration + x_duration,
+                            0.50 * (w_duration + x_duration),
+                        ),
+                        cfg.time_tolerance_bars,
+                    )
+                ):
+                    continue
+                for xx_count in connector_counts:
+                    xx_idx = y_idx + xx_count
+                    z_count = end_idx - xx_idx
+                    if xx_idx >= end_idx or z_count not in component_counts:
+                        continue
+                    xx_length = abs(swings[xx_idx].price - swings[y_idx].price)
+                    xx_ratio = _safe_ratio(xx_length, y_length)
+                    xx_duration = max(1, swings[xx_idx].position - swings[y_idx].position)
+                    x_boundary_pass = (
+                        swings[xx_idx].price <= swings[x_idx].price
+                        if swings[x_idx].kind == 1
+                        else swings[xx_idx].price >= swings[x_idx].price
+                    )
+                    if not (
+                        np.isfinite(xx_ratio)
+                        and 0.50 <= xx_ratio <= 0.618
+                        and x_boundary_pass
+                        and abs(xx_duration - x_duration) <= cfg.time_tolerance_bars
+                        and xx_duration < y_duration
+                    ):
+                        continue
+                    z = component(xx_idx, end_idx, True)
+                    if not z["confirmed"]:
+                        continue
+                    z_length = abs(swings[end_idx].price - swings[xx_idx].price)
+                    z_projection = _safe_ratio(z_length, y_length)
+                    z_duration = max(1, swings[end_idx].position - swings[xx_idx].position)
+                    if not (
+                        np.isfinite(z_projection)
+                        and 0.618 <= z_projection <= 1.618
+                        and _matches_absolute_time_targets(
+                            z_duration,
+                            (
+                                y_duration,
+                                y_duration + xx_duration,
+                                0.50 * (y_duration + xx_duration),
+                            ),
+                            cfg.time_tolerance_bars,
+                        )
+                    ):
+                        continue
+                    return {
+                        "confirmed": True,
+                        "primary": "W-X-Y-XX-Z",
+                        "alternate": "",
+                        "subtype": "TRIPLE_COMPLETE",
+                        "b_ratio": x_ratio,
+                        "c_vs_a": y_projection,
+                        "c_vs_b": z_projection,
+                        "labels": ("W", "X", "Y", "XX", "Z"),
+                        "leg_counts": {
+                            "W": w_count,
+                            "X": x_count,
+                            "Y": y_count,
+                            "XX": xx_count,
+                            "Z": z_count,
+                        },
+                        "endpoint_indices": (w_idx, x_idx, y_idx, xx_idx, end_idx),
+                        "terminal_index": end_idx,
+                        "confirmation_index": end_idx,
+                        "terminal_fib_value": z_projection,
+                        "fib_values": {
+                            "X": x_ratio,
+                            "Y": y_projection,
+                            "XX": xx_ratio,
+                            "Z": z_projection,
+                        },
+                        "internal_pattern": (
+                            f"{w['internal_pattern']} | X{x_count} | {y['internal_pattern']} | "
+                            f"XX{xx_count} | {z['internal_pattern']}"
+                        ),
+                        "internal_count": end_idx - start_idx,
+                        "reason_code": "TRIPLE_CONFIRMED",
+                        "developing_label": "Z",
+                        "progress_score": 5,
+                        "note": (
+                            f"W-X-Y-XX-Z complete; X={x_ratio:.2%} ({x_class}), "
+                            f"Y={y_projection:.2%}, XX={xx_ratio:.2%}, Z={z_projection:.2%}; "
+                            "all locked Fib/time and X-boundary gates pass."
+                        ),
+                    }
+
+    return {
+        "confirmed": False,
+        "primary": "W-X-Y-XX-Z",
+        "alternate": "",
+        "subtype": "TRIPLE_FORMING",
+        "b_ratio": np.nan,
+        "c_vs_a": np.nan,
+        "c_vs_b": np.nan,
+        "labels": ("W", "X", "Y", "XX", "Z"),
+        "leg_counts": {},
+        "endpoint_indices": (),
+        "internal_pattern": "W + X + Y + XX + Z component containers",
+        "internal_count": max(0, end_idx - start_idx),
+        "reason_code": "TRIPLE_COMPONENT_PENDING",
+        "developing_label": "Z?",
+        "progress_score": 0,
+        "note": "Triple component, connector, Fib, boundary or time gates are incomplete.",
+    }
 
 
 def _evaluate_triangle_correction(
@@ -1968,7 +2449,7 @@ def _origin_break_position(
     return None
 
 def _correction_count(cfg: ElliottWaveConfig) -> int:
-    if cfg.correction_pattern in {"W-X-Y-X-Z", "A-B-C-D-E"}:
+    if cfg.correction_pattern in {"W-X-Y-X-Z", "W-X-Y-XX-Z", "A-B-C-D-E"}:
         return 5
     return 3
 
@@ -2012,7 +2493,8 @@ def _correction_label(offset: int, cfg: ElliottWaveConfig) -> str:
     correction_labels = {
         "A-B-C": {0: "(A)", 1: "(B)", 2: "(C)"},
         "W-X-Y": {0: "W", 1: "X", 2: "Y"},
-        "W-X-Y-X-Z": {0: "W", 1: "X", 2: "Y", 3: "X", 4: "Z"},
+        "W-X-Y-X-Z": {0: "W", 1: "X", 2: "Y", 3: "XX", 4: "Z"},
+        "W-X-Y-XX-Z": {0: "W", 1: "X", 2: "Y", 3: "XX", 4: "Z"},
         "A-B-C-D-E": {0: "(A)", 1: "(B)", 2: "(C)", 3: "(D)", 4: "(E)"},
     }
     return correction_labels[cfg.correction_pattern][offset]

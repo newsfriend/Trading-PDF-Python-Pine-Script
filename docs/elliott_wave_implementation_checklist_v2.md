@@ -35,10 +35,10 @@ The older manuals and chart images remain supporting references.
 
 | Requirement | Status | Evidence / remaining scope |
 | --- | --- | --- |
-| Wave 2 correction container | PARTIAL | Simple Zig-Zag and Flat children, 23.6%-81.2% normal context, separate 14% microscopic clue, mandatory V4 time gate, deep-retrace HP eligibility, and Point-0 invalidation are implemented. W-X-Y and advanced correction subtypes remain pending. |
+| Wave 2 correction container | PARTIAL | Simple Zig-Zag, Flat and W-X-Y children, 23.6%-81.2% normal context, separate 14% microscopic clue, mandatory V4 time gate, deep-retrace HP eligibility, and Point-0 invalidation are implemented. Advanced subtype/channel evidence remains pending. |
 | Structure-specific B-wave rules | DONE for simple ABC | Zig-Zag B uses the V4 continuous 1%-61.8% range; Flat B uses 61.8%-111%. The Flat interval is not applied universally. |
 | Wave 3 trending/terminal classifier | PARTIAL | 5/9/13/17/21 internals, >=161.8% trending, 61.8%-161.8% terminal-with-overlap, 2700% V4 maximum, mandatory time gate, and momentum evidence are implemented. Full diagonal and channel classification remain pending. |
-| Wave 4 correction container and W5 gate | PARTIAL | Zig-Zag, Flat and six Triangle families, Base-to-W3 retracement, subtype-aware overlap, mandatory V4 time gate, thrust ranges, and the no-premature-W5 gate are implemented. Double/triple corrections and channel-break confirmation remain pending. |
+| Wave 4 correction container and W5 gate | PARTIAL | Zig-Zag, Flat, W-X-Y, W-X-Y-XX-Z and six Triangle families, Base-to-W3 retracement, subtype-aware overlap, mandatory V4 time gate, thrust ranges, and the no-premature-W5 gate are implemented. Full channel evidence remains pending. |
 | Wave 5 normal/truncated classifier | PARTIAL | 127%-261.8% normal projection, mandatory V4 time gate, double-extension truncated context, W3-not-shortest, and optional/required divergence are implemented. Extended and ending-diagonal candidates remain FORMING until their classifiers are added. |
 | Persistent confirmed labels 0-5 | DONE for supported core paths | Pine and Python lock each main wave only after its parent-state rules pass; later raw pivots remain developing candidates. |
 | Phase 2 regression cases T02-T13 | DONE in Python | Tests cover normal/microscopic W2, Flat B at/above 111%, trending/terminal/extended W3, W4 completion/overlap gating, and normal/truncated W5. Pine has matching static contract tests; TradingView compilation is still required. |
@@ -49,12 +49,12 @@ The older manuals and chart images remain supporting references.
 | --- | --- | --- |
 | Full degree router and simultaneous multi-degree counts | PARTIAL | Preset/source metadata exists, but independent Major/Intermediate/Minor engines do not yet run together. |
 | Complete Zig-Zag and Flat families | PARTIAL | Simple internal candidates exist; all source subtypes, termination variants, channels, and time rules still need implementation. |
-| W-X-Y and W-X-Y-XX-Z classifiers | TBD | Connector rules, alternation, termination, and source-preset decisions. |
+| W-X-Y and W-X-Y-XX-Z classifiers | PARTIAL | Both engines classify canonical Flat/Zig-Zag/Triangle component totals, small/large X, subtype-aware Y projection/time, distinct XX, XX Point-X boundary, and Z Fib/time. T21/T22 deterministic tests pass; TradingView compilation, replay evidence, and nested same-degree complex children remain pending. |
 | Six triangle variants | PARTIAL | Horizontal/Irregular/Running Contracting and Expanding classifiers run in Pine/Python with five corrective legs, size order, boundary direction, retracement evidence, absolute thrust targets and Wave-E invalidation levels. Apex/touch-count and closed B-D break confirmation remain pending. |
 | Leading and ending diagonal classifiers | TBD | Overlap, converging/diverging trend lines, and internal 3/5-wave rules. |
 | Channel, time, momentum, HP and FBD support engines | PARTIAL | Mandatory V4 Wave 2-5 time gates exist. HP eligibility is intentionally separate: a completed correction in the 61.8%-81.2% Fib zone remains eligible with Point 0 protected even when extended timing keeps W2 FORMING. Full channels, targets, FBD and confidence scoring remain pending. |
-| Automatic larger correction after Wave 5 | PARTIAL | Both engines now transition into `LARGER_CORRECTION_CONTAINER` and lock actual A-B-C pivots for complete Zig-Zag/Flat paths. W-X-Y, triples and triangles remain pending. |
-| Double-confirmation outcome | TBD | V4 resolves the rule; the 0-X break / 38.2% post-Y confirmation implementation remains pending. |
+| Automatic larger correction after Wave 5 | PARTIAL | Both engines transition into `LARGER_CORRECTION_CONTAINER` and expose actual terminal C/Y/Z/E pivots for supported Zig-Zag, Flat, W-X-Y, triple and Triangle paths. TradingView replay validation remains pending. |
+| Double-confirmation outcome | DONE in code | After Y completes, both engines require the first closed 0-X break or >=38.2% WXY retracement within Y duration; otherwise the Double remains FORMING. TradingView replay evidence remains an acceptance item. |
 | Pine/Python candle-for-candle parity | PARTIAL | State semantics/settings are aligned; identical exported market data still needs comparison. |
 | Backtesting acceptance | TBD | Requires completed classifiers, deterministic signal policy, datasets, and client-approved expected counts. |
 | TradingView compile and performance evidence | PARTIAL | Local tests validate source contracts; final Pine v6 compilation and chart performance must be checked in TradingView. |

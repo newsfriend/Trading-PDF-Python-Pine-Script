@@ -46,7 +46,12 @@ The core impulse implementation then provides:
 - all six contracting/expanding Triangle families with five-leg validation and
   subtype-specific thrust ranges (never enabled for Wave 2); and
 - absolute near/far triangle thrust targets plus the Wave-E invalidation price,
-  exported by Python and drawn as Pine chart levels.
+  exported by Python and drawn as Pine chart levels;
+- W-X-Y classification with small/large X, W/4-W/3-W/2 X timing, subtype-aware
+  Y projections and the locked post-Y closed-break/38.2% confirmation gate;
+- W-X-Y-XX-Z classification with distinct X and XX identities, 50%-61.8% XX
+  retracement, Point-X boundary protection, and independent Y/XX/Z time/Fib
+  evidence; and
 - W3-not-shortest and configurable W3/W5 divergence checks; and
 - an audit trail containing parent state, pattern, subtype, Fib anchor/value,
   internal structure, momentum, reason code, and next condition.
@@ -54,8 +59,8 @@ The core impulse implementation then provides:
 Crossing Point 0 before the impulse is complete produces
 `W2_ORIGIN_BREAK`, releases the count, and starts a controlled recount. Once a
 supported five-wave impulse is locked, the engine opens a developing correction
-container. A, B, and C are locked on their actual pivots only after a complete
-Zig-Zag or Flat terminal structure passes. Point 0 no longer invalidates the
+container. Terminal C, Y, Z, or E labels are locked on their actual pivots only
+after the relevant correction structure passes. Point 0 no longer invalidates the
 already-completed impulse during its following larger correction.
 
 HP BUY/SELL is evaluated separately from Wave-2 confirmation. A completed
@@ -79,15 +84,15 @@ including `ew_label`, `ew_parent_state`, `ew_primary_pattern`,
 `ew_fib_anchor`, `ew_fib_value`, `ew_time_value`, `ew_macd_state`,
 `ew_internal_pattern`, `ew_hp_signal`, and `ew_next_condition`.
 
-Pine draws locked labels 0-5 and A-B-C for supported paths and shows the same parent
+Pine draws locked labels 0-5 and A-B-C, W-X-Y, W-X-Y-XX-Z, or A-B-C-D-E for supported paths and shows the same parent
 state, pattern, evidence, reason, recount, and next-condition diagnostics in its
 panel. Raw pivots that have not passed a parent gate are shown only as small
 developing labels.
 
 ## Explicit Scope Boundary
 
-The current update covers the core impulse and simple larger A-B-C transition,
-not the entire V4.0 deliverable. W-X-Y/triples, triangle variants, full
+The current update covers the core impulse plus the current simple, double,
+triple and triangle correction classifiers, not the entire V4.0 deliverable. Full
 leading/ending diagonals, simultaneous multi-degree routing, channel engines,
 full time/HP/FBD scoring, parity validation, and backtesting remain later work.
 Unsupported extended/diagonal Wave 5 candidates remain FORMING or INVALID and

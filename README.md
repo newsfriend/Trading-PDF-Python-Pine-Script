@@ -64,7 +64,11 @@ now provides:
 - Mandatory V4 closed-bar confirmation windows for Waves 2-5.
 - Six Triangle families with A-B-C-D-E structure, boundary/size checks, and
   contracting or expanding thrust targets plus Wave-E invalidation levels.
-- Persistent labels 0-5 followed by validated A-B-C, with parent-state gates
+- Automatic W-X-Y and W-X-Y-XX-Z correction candidates with distinct X/XX
+  connectors, component Fib/time gates, X-boundary validation, and V4 post-Y
+  confirmation by closed 0-X break or 38.2% WXY retracement.
+- Persistent labels 0-5 followed by validated A-B-C, W-X-Y, W-X-Y-XX-Z, or
+  A-B-C-D-E, with parent-state gates
   that prevent premature Wave 5 or correction labels.
 - Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.
 - HP Fibonacci opportunities remain visible during extended Wave-2 timing;
@@ -72,8 +76,8 @@ now provides:
 - Auditable pattern, subtype, Fib, time, momentum, reason, and next-condition
   output.
 
-This covers the core impulse and simple larger A-B-C transition, not the
-complete V4.0 Elliott Wave deliverable. Complex W-X-Y/triples, triangle variants, full diagonals,
+This covers the core impulse and the implemented correction families, not the
+complete V4.0 Elliott Wave deliverable. Full correction subtypes, full diagonals,
 multi-degree routing, parity validation, and backtesting remain later phases.
 Unsupported paths remain visibly blocked instead of being guessed. The old
 modulo-style sequence is available only as `Legacy fixed cycle` comparison mode.

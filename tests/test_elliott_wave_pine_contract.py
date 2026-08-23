@@ -57,8 +57,9 @@ class ElliottWavePineContractTests(unittest.TestCase):
     def test_completed_impulse_opens_and_draws_larger_abc(self):
         self.assertIn('engineStage := "LARGER_CORRECTION_CONTAINER"', self.source)
         self.assertIn('lastReasonCode := "CORRECTION_COMPLETE"', self.source)
-        for label in ('text="A"', 'text="B"', 'text="C"'):
-            self.assertIn(label, self.source)
+        self.assertIn("f_locked_correction_label", self.source)
+        for position in range(3):
+            self.assertIn(f"text=f_locked_correction_label({position})", self.source)
 
     def test_v4_closed_bar_alert_contract_is_present(self):
         for alert_name in (
@@ -110,8 +111,8 @@ class ElliottWavePineContractTests(unittest.TestCase):
             "RUNNING_EXPANDING",
         ):
             self.assertIn(subtype, self.source)
-        self.assertIn('text="D"', self.source)
-        self.assertIn('text="E"', self.source)
+        self.assertIn("text=f_locked_correction_label(3)", self.source)
+        self.assertIn("text=f_locked_correction_label(4)", self.source)
         for field in (
             "lockedTriangleTargetNear",
             "lockedTriangleTargetFar",
@@ -119,6 +120,24 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(field, self.source)
         self.assertIn("triangleInvalidLine = line.new", self.source)
+
+    def test_v4_double_wxy_uses_locked_fib_time_and_post_y_confirmation(self):
+        self.assertIn("f_eval_complex_correction", self.source)
+        self.assertIn("xRatio >= 0.142 and xRatio <= 0.50", self.source)
+        self.assertIn("xRatio >= 0.618 and xRatio <= 1.11", self.source)
+        self.assertIn("yProjection >= 0.618", self.source)
+        self.assertIn("f_double_post_y_confirmation", self.source)
+        self.assertIn("WXY_38_2_RETRACE", self.source)
+        self.assertIn("0-X_CLOSED_BREAK", self.source)
+        self.assertIn("DOUBLE_CONFIRMATION_PENDING", self.source)
+
+    def test_v4_triple_uses_distinct_xx_component_and_terminal_z(self):
+        self.assertIn('primary := "W-X-Y-XX-Z"', self.source)
+        self.assertIn("xxRatio >= 0.50 and xxRatio <= 0.618", self.source)
+        self.assertIn("xBoundaryPass", self.source)
+        self.assertIn("f_near_duration(xxDuration, xDuration)", self.source)
+        self.assertIn('reason := "TRIPLE_CONFIRMED"', self.source)
+        self.assertIn('position == 3 ? "XX"', self.source)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@ from python.elliott_wave_notes import (
     compute_elliott_waves,
     _run_candidate_state,
     _evaluate_correction,
+    _evaluate_double_correction,
+    _evaluate_triple_correction,
     _evaluate_triangle_correction,
     _with_indicators,
 )
@@ -108,6 +110,36 @@ def _through_larger_abc():
     _append_prices(swings, [160, 168, 150, 158, 140])  # A: 5 moves
     _append_prices(swings, [150, 145, 157.5])  # B: 3 moves, 50% of A
     _append_prices(swings, [145, 150, 130, 138, 115])  # C: 5 moves
+    return swings
+
+
+def _through_larger_wxy(*, confirmed=True):
+    swings = _through_w5()
+    _append_prices(swings, [160, 168, 150, 158, 140])
+    _append_prices(swings, [150, 145, 157.5])
+    _append_prices(swings, [145, 150, 130, 138, 120])  # W: Zig-Zag 5-3-5
+    _append_prices(swings, [145])  # small X
+    _append_prices(swings, [132, 138, 125, 132, 115])
+    _append_prices(swings, [125, 120, 130])
+    _append_prices(swings, [118, 124, 105, 112, 90])  # Y: Zig-Zag 5-3-5
+    if confirmed:
+        _append_prices(swings, [125])  # >=38.2% closed post-Y retracement
+    return swings
+
+
+def _triple_from_origin():
+    swings = [_swing(0, 175, 1)]
+    _append_prices(swings, [160, 168, 150, 158, 140])
+    _append_prices(swings, [150, 145, 157.5])
+    _append_prices(swings, [145, 150, 130, 138, 120])
+    _append_prices(swings, [145])
+    _append_prices(swings, [132, 138, 125, 132, 115])
+    _append_prices(swings, [125, 120, 130])
+    _append_prices(swings, [118, 124, 105, 112, 90])
+    _append_prices(swings, [120])  # XX: 54.5% of Y, below X
+    _append_prices(swings, [105, 112, 95, 102, 90])
+    _append_prices(swings, [100, 95, 105])
+    _append_prices(swings, [92, 98, 78, 85, 65])
     return swings
 
 
@@ -387,6 +419,84 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(list(state["active"]["waves"]), ["0", "1", "2", "3", "4", "5", "A", "B", "C"])
         self.assertEqual(state["active"]["waves"]["C"]["reason_code"], "C_CONFIRMED")
         self.assertEqual(state["last_reason_code"], "CORRECTION_COMPLETE")
+
+    def test_t21_double_wxy_waits_for_locked_post_y_confirmation(self):
+        forming_swings = _through_larger_wxy(confirmed=False)
+        start_idx = len(_through_w5()) - 1
+        forming = _evaluate_double_correction(
+            forming_swings,
+            start_idx,
+            len(forming_swings) - 1,
+            self.config,
+            allow_triangle=True,
+        )
+        self.assertFalse(forming["confirmed"])
+        self.assertEqual(forming["reason_code"], "DOUBLE_CONFIRMATION_PENDING")
+
+        confirmed_swings = _through_larger_wxy()
+        confirmed = _evaluate_double_correction(
+            confirmed_swings,
+            start_idx,
+            len(confirmed_swings) - 1,
+            self.config,
+            allow_triangle=True,
+        )
+        self.assertTrue(confirmed["confirmed"])
+        self.assertEqual(confirmed["labels"], ("W", "X", "Y"))
+        self.assertEqual(confirmed["confirmation_index"], len(confirmed_swings) - 1)
+        self.assertEqual(confirmed["reason_code"], "DOUBLE_CONFIRMED")
+
+    def test_t21_double_confirmation_uses_closed_candle_data_when_available(self):
+        swings = _through_larger_wxy(confirmed=False)
+        _append_prices(swings, [92])
+        start_idx = len(_through_w5()) - 1
+        y = swings[-2]
+        closes = [90.0] * (swings[-1].confirmed_position + 1)
+        closes[y.confirmed_position] = 125.0
+        source = pd.DataFrame({"close": closes})
+
+        correction = _evaluate_double_correction(
+            swings,
+            start_idx,
+            len(swings) - 1,
+            self.config,
+            allow_triangle=True,
+            source=source,
+        )
+
+        self.assertTrue(correction["confirmed"])
+        self.assertIn(
+            correction["reason_code"],
+            {"DOUBLE_CONFIRMED"},
+        )
+
+    def test_v4_parallel_classifier_returns_terminal_y_not_confirmation_swing(self):
+        swings = _through_larger_wxy()
+        start_idx = len(_through_w5()) - 1
+        correction = _evaluate_correction(
+            swings,
+            start_idx,
+            len(swings) - 1,
+            self.config,
+            allow_triangle=True,
+        )
+
+        self.assertTrue(correction["confirmed"])
+        self.assertEqual(correction["primary"], "W-X-Y")
+        self.assertEqual(correction["terminal_index"], len(swings) - 2)
+
+    def test_t22_triple_tracks_x_and_xx_as_distinct_components(self):
+        swings = _triple_from_origin()
+        triple = _evaluate_triple_correction(
+            swings, 0, len(swings) - 1, self.config
+        )
+
+        self.assertTrue(triple["confirmed"])
+        self.assertEqual(triple["labels"], ("W", "X", "Y", "XX", "Z"))
+        self.assertEqual(triple["leg_counts"]["X"], 1)
+        self.assertEqual(triple["leg_counts"]["XX"], 1)
+        self.assertGreaterEqual(triple["fib_values"]["XX"], 0.50)
+        self.assertLessEqual(triple["fib_values"]["XX"], 0.618)
 
     def test_v4_horizontal_contracting_triangle_uses_five_corrective_legs(self):
         swings = _contracting_triangle_from(_through_w3())

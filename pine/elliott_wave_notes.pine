@@ -71,7 +71,7 @@ timeToleranceBars = input.int(8, "Time rule tolerance (closed bars)", minval=0, 
 timeTolerance = 0.25
 
 groupDisplay = "Display"
-correctionPattern = input.string("A-B-C", "Correction labels", options=["A-B-C", "W-X-Y", "W-X-Y-X-Z", "A-B-C-D-E"], group=groupDisplay)
+correctionPattern = input.string("A-B-C", "Correction labels", options=["A-B-C", "W-X-Y", "W-X-Y-XX-Z", "A-B-C-D-E"], group=groupDisplay)
 showWave4Internal = input.bool(true, "Show Wave 4 internal A/B/C", group=groupDisplay)
 countDisplayMode = input.string("Validated Anchor", "Count mode", options=["Validated Anchor", "All swings"], group=groupDisplay)
 showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
@@ -171,8 +171,11 @@ var float lockedTriangleInvalidation = na
 f_label_size() =>
     labelSizeInput == "tiny" ? size.tiny : labelSizeInput == "normal" ? size.normal : size.small
 
+f_locked_correction_label(position) =>
+    lockedCorrectionPattern == "W-X-Y" ? (position == 0 ? "W" : position == 1 ? "X" : "Y") : lockedCorrectionPattern == "W-X-Y-XX-Z" ? (position == 0 ? "W" : position == 1 ? "X" : position == 2 ? "Y" : position == 3 ? "XX" : "Z") : position == 0 ? "A" : position == 1 ? "B" : position == 2 ? "C" : position == 3 ? "D" : "E"
+
 f_correction_count() =>
-    correctionPattern == "W-X-Y-X-Z" or correctionPattern == "A-B-C-D-E" ? 5 : 3
+    correctionPattern == "W-X-Y-XX-Z" or correctionPattern == "A-B-C-D-E" ? 5 : 3
 
 f_cycle_length() =>
     (showWave4Internal ? 8 : 6) + f_correction_count()
@@ -183,8 +186,8 @@ f_phase(index) =>
 f_correction_text(offset) =>
     if correctionPattern == "W-X-Y"
         offset == 0 ? "W" : offset == 1 ? "X" : "Y"
-    else if correctionPattern == "W-X-Y-X-Z"
-        offset == 0 ? "W" : offset == 1 ? "X" : offset == 2 ? "Y" : offset == 3 ? "X" : "Z"
+    else if correctionPattern == "W-X-Y-XX-Z"
+        offset == 0 ? "W" : offset == 1 ? "X" : offset == 2 ? "Y" : offset == 3 ? "XX" : "Z"
     else if correctionPattern == "A-B-C-D-E"
         offset == 0 ? "(A)" : offset == 1 ? "(B)" : offset == 2 ? "(C)" : offset == 3 ? "(D)" : "(E)"
     else
@@ -484,6 +487,193 @@ f_duration_ratio(startIndex, endIndex, referenceStartIndex, referenceEndIndex) =
 
 f_near_duration(observed, target) =>
     math.abs(observed - target) <= timeToleranceBars
+
+f_complex_component_count(optionIndex) =>
+    optionIndex == 0 ? 11 : optionIndex == 1 ? 13 : 15
+
+f_connector_count(optionIndex) =>
+    optionIndex == 0 ? 1 : optionIndex == 1 ? 3 : optionIndex == 2 ? 7 : 11
+
+f_eval_component(startIndex, endIndex, allowTriangle) =>
+    [simpleConfirmed, simplePrimary, simpleAlternate, simpleBRatio, simplePattern, simpleCount, simpleReason, simpleA, simpleB, simpleC] = f_eval_simple_correction(startIndex, endIndex)
+    [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleA, triangleB, triangleC, triangleD, triangleE, triangleThrustMin, triangleThrustMax] = f_eval_triangle(startIndex, endIndex)
+    useTriangle = allowTriangle and triangleConfirmed
+    [useTriangle or simpleConfirmed, useTriangle ? "Triangle" : simplePrimary, useTriangle ? trianglePattern : simplePattern]
+
+f_double_post_y_confirmation(startIndex, xIndex, yIndex, endIndex) =>
+    confirmed = false
+    confirmationIndex = yIndex
+    confirmationMode = ""
+    if endIndex > yIndex
+        originPrice = array.get(swingPrices, startIndex)
+        xPrice = array.get(swingPrices, xIndex)
+        yPrice = array.get(swingPrices, yIndex)
+        originBar = array.get(swingBars, startIndex)
+        xBar = array.get(swingBars, xIndex)
+        yBar = array.get(swingBars, yIndex)
+        yDuration = math.max(1, yBar - xBar)
+        deadline = yBar + yDuration
+        wxyRange = math.abs(yPrice - originPrice)
+        downward = yPrice < originPrice
+        lineSlope = f_ratio(xPrice - originPrice, math.max(1, xBar - originBar))
+        firstObservedBar = yBar + 1
+        lastObservedBar = math.min(bar_index, deadline)
+        if lastObservedBar >= firstObservedBar
+            for observedBar = firstObservedBar to lastObservedBar
+                if not confirmed
+                    observedOffset = bar_index - observedBar
+                    observedClose = close[observedOffset]
+                    retrace = f_ratio(downward ? observedClose - yPrice : yPrice - observedClose, wxyRange)
+                    lineValue = originPrice + lineSlope * (observedBar - originBar)
+                    trendlineBreak = downward ? observedClose > lineValue : observedClose < lineValue
+                    if trendlineBreak or (not na(retrace) and retrace >= 0.382)
+                        confirmed := true
+                        confirmationIndex := endIndex
+                        confirmationMode := trendlineBreak ? "0-X_CLOSED_BREAK" : "WXY_38_2_RETRACE"
+    [confirmed, confirmationIndex, confirmationMode]
+
+f_eval_complex_correction(startIndex, endIndex, allowTriple) =>
+    confirmed = false
+    primary = "W-X-Y"
+    subtype = "DOUBLE_FORMING"
+    selectedXRatio = float(na)
+    selectedYProjection = float(na)
+    selectedXXRatio = float(na)
+    selectedZProjection = float(na)
+    internalPattern = "W + X + Y component containers"
+    reason = "DOUBLE_COMPONENT_PENDING"
+    selectedWCount = 0
+    selectedXCount = 0
+    selectedYCount = 0
+    selectedXXCount = 0
+    selectedZCount = 0
+    terminalIndex = endIndex
+    confirmationIndex = endIndex
+    pendingFound = false
+    if startIndex >= 0 and endIndex > startIndex
+        for wOption = 0 to 2
+            wCount = f_complex_component_count(wOption)
+            wIndex = startIndex + wCount
+            if wIndex < endIndex
+                [wConfirmed, wPattern, wInternal] = f_eval_component(startIndex, wIndex, false)
+                if wConfirmed
+                    wLength = math.abs(array.get(swingPrices, wIndex) - array.get(swingPrices, startIndex))
+                    wDuration = math.max(1, array.get(swingBars, wIndex) - array.get(swingBars, startIndex))
+                    for xOption = 0 to 3
+                        xCount = f_connector_count(xOption)
+                        xIndex = wIndex + xCount
+                        if xIndex < endIndex
+                            xLength = math.abs(array.get(swingPrices, xIndex) - array.get(swingPrices, wIndex))
+                            xRatio = f_ratio(xLength, wLength)
+                            xSmall = not na(xRatio) and xRatio >= 0.142 and xRatio <= 0.50
+                            xLarge = not na(xRatio) and xRatio >= 0.618 and xRatio <= 1.11
+                            xDuration = math.max(1, array.get(swingBars, xIndex) - array.get(swingBars, wIndex))
+                            xTimePass = xDuration < wDuration and (f_near_duration(xDuration, 0.25 * wDuration) or f_near_duration(xDuration, wDuration / 3.0) or f_near_duration(xDuration, 0.50 * wDuration))
+                            if (xSmall or xLarge) and xTimePass
+                                for yOption = 0 to 2
+                                    yCount = f_complex_component_count(yOption)
+                                    yIndex = xIndex + yCount
+                                    if yIndex <= endIndex
+                                        [yConfirmed, yPattern, yInternal] = f_eval_component(xIndex, yIndex, true)
+                                        if yConfirmed
+                                            yDuration = math.max(1, array.get(swingBars, yIndex) - array.get(swingBars, xIndex))
+                                            yTimePass = f_near_duration(yDuration, wDuration) or f_near_duration(yDuration, wDuration + xDuration) or f_near_duration(yDuration, 0.50 * (wDuration + xDuration))
+                                            yProjection = f_ratio(math.abs(array.get(swingPrices, yIndex) - array.get(swingPrices, xIndex)), wLength)
+                                            yMax = wPattern == "Zig-Zag" and yPattern == "Triangle" ? 1.0 : wPattern == "Zig-Zag" and yPattern == "Zig-Zag" ? 2.618 : 1.618
+                                            yPass = not na(yProjection) and yProjection >= 0.618 and yProjection <= yMax and yTimePass
+                                            if yPass
+                                                [postYConfirmed, postYIndex, postYMode] = f_double_post_y_confirmation(startIndex, xIndex, yIndex, endIndex)
+                                                if postYConfirmed and not confirmed
+                                                    confirmed := true
+                                                    primary := "W-X-Y"
+                                                    subtype := "DOUBLE_" + str.upper(str.replace_all(wPattern, "-", "_")) + "_" + str.upper(str.replace_all(yPattern, "-", "_"))
+                                                    selectedXRatio := xRatio
+                                                    selectedYProjection := yProjection
+                                                    internalPattern := wInternal + " | X" + str.tostring(xCount) + " | " + yInternal
+                                                    reason := "DOUBLE_CONFIRMED_" + postYMode
+                                                    selectedWCount := wCount
+                                                    selectedXCount := xCount
+                                                    selectedYCount := yCount
+                                                    terminalIndex := yIndex
+                                                    confirmationIndex := postYIndex
+                                                else if not pendingFound
+                                                    pendingFound := true
+                                                    primary := "W-X-Y"
+                                                    subtype := "DOUBLE_FORMING"
+                                                    selectedXRatio := xRatio
+                                                    selectedYProjection := yProjection
+                                                    internalPattern := wInternal + " | X" + str.tostring(xCount) + " | " + yInternal
+                                                    reason := "DOUBLE_CONFIRMATION_PENDING"
+                                                    selectedWCount := wCount
+                                                    selectedXCount := xCount
+                                                    selectedYCount := yCount
+                                                    terminalIndex := yIndex
+                                                    confirmationIndex := yIndex
+        if allowTriple
+            for wOption = 0 to 2
+                wCount = f_complex_component_count(wOption)
+                wIndex = startIndex + wCount
+                if wIndex < endIndex
+                    [wConfirmed, wPattern, wInternal] = f_eval_component(startIndex, wIndex, false)
+                    if wConfirmed
+                        wLength = math.abs(array.get(swingPrices, wIndex) - array.get(swingPrices, startIndex))
+                        wDuration = math.max(1, array.get(swingBars, wIndex) - array.get(swingBars, startIndex))
+                        for xOption = 0 to 3
+                            xCount = f_connector_count(xOption)
+                            xIndex = wIndex + xCount
+                            if xIndex < endIndex
+                                xLength = math.abs(array.get(swingPrices, xIndex) - array.get(swingPrices, wIndex))
+                                xRatio = f_ratio(xLength, wLength)
+                                xClassPass = not na(xRatio) and ((xRatio >= 0.142 and xRatio <= 0.50) or (xRatio >= 0.618 and xRatio <= 1.11))
+                                xDuration = math.max(1, array.get(swingBars, xIndex) - array.get(swingBars, wIndex))
+                                xTimePass = xDuration < wDuration and (f_near_duration(xDuration, 0.25 * wDuration) or f_near_duration(xDuration, wDuration / 3.0) or f_near_duration(xDuration, 0.50 * wDuration))
+                                if xClassPass and xTimePass
+                                    for yOption = 0 to 2
+                                        yCount = f_complex_component_count(yOption)
+                                        yIndex = xIndex + yCount
+                                        if yIndex < endIndex
+                                            [yConfirmed, yPattern, yInternal] = f_eval_component(xIndex, yIndex, true)
+                                            if yConfirmed
+                                                yLength = math.abs(array.get(swingPrices, yIndex) - array.get(swingPrices, xIndex))
+                                                yProjection = f_ratio(yLength, wLength)
+                                                yDuration = math.max(1, array.get(swingBars, yIndex) - array.get(swingBars, xIndex))
+                                                yTimePass = f_near_duration(yDuration, wDuration) or f_near_duration(yDuration, wDuration + xDuration) or f_near_duration(yDuration, 0.50 * (wDuration + xDuration))
+                                                if not na(yProjection) and yProjection >= 0.618 and yProjection <= 1.618 and yTimePass
+                                                    for xxOption = 0 to 3
+                                                        xxCount = f_connector_count(xxOption)
+                                                        xxIndex = yIndex + xxCount
+                                                        zCount = endIndex - xxIndex
+                                                        zCountAllowed = zCount == 11 or zCount == 13 or zCount == 15
+                                                        if xxIndex < endIndex and zCountAllowed
+                                                            xxLength = math.abs(array.get(swingPrices, xxIndex) - array.get(swingPrices, yIndex))
+                                                            xxRatio = f_ratio(xxLength, yLength)
+                                                            xxDuration = math.max(1, array.get(swingBars, xxIndex) - array.get(swingBars, yIndex))
+                                                            xIsHigh = array.get(swingTypes, xIndex) == 1
+                                                            xBoundaryPass = xIsHigh ? array.get(swingPrices, xxIndex) <= array.get(swingPrices, xIndex) : array.get(swingPrices, xxIndex) >= array.get(swingPrices, xIndex)
+                                                            xxPass = not na(xxRatio) and xxRatio >= 0.50 and xxRatio <= 0.618 and xBoundaryPass and f_near_duration(xxDuration, xDuration) and xxDuration < yDuration
+                                                            [zConfirmed, zPattern, zInternal] = f_eval_component(xxIndex, endIndex, true)
+                                                            zLength = math.abs(array.get(swingPrices, endIndex) - array.get(swingPrices, xxIndex))
+                                                            zProjection = f_ratio(zLength, yLength)
+                                                            zDuration = math.max(1, array.get(swingBars, endIndex) - array.get(swingBars, xxIndex))
+                                                            zTimePass = f_near_duration(zDuration, yDuration) or f_near_duration(zDuration, yDuration + xxDuration) or f_near_duration(zDuration, 0.50 * (yDuration + xxDuration))
+                                                            if xxPass and zConfirmed and not na(zProjection) and zProjection >= 0.618 and zProjection <= 1.618 and zTimePass
+                                                                confirmed := true
+                                                                primary := "W-X-Y-XX-Z"
+                                                                subtype := "TRIPLE_COMPLETE"
+                                                                selectedXRatio := xRatio
+                                                                selectedYProjection := yProjection
+                                                                selectedXXRatio := xxRatio
+                                                                selectedZProjection := zProjection
+                                                                internalPattern := wInternal + " | X" + str.tostring(xCount) + " | " + yInternal + " | XX" + str.tostring(xxCount) + " | " + zInternal
+                                                                reason := "TRIPLE_CONFIRMED"
+                                                                selectedWCount := wCount
+                                                                selectedXCount := xCount
+                                                                selectedYCount := yCount
+                                                                selectedXXCount := xxCount
+                                                                selectedZCount := zCount
+                                                                terminalIndex := endIndex
+                                                                confirmationIndex := endIndex
+    [confirmed, primary, subtype, selectedXRatio, selectedYProjection, selectedXXRatio, selectedZProjection, internalPattern, math.max(0, terminalIndex - startIndex), reason, selectedWCount, selectedXCount, selectedYCount, selectedXXCount, selectedZCount, terminalIndex, confirmationIndex]
 
 f_w2_time_pass(w1Duration, w2Duration) =>
     f_near_duration(w2Duration, 0.25 * w1Duration) or f_near_duration(w2Duration, 0.50 * w1Duration) or f_near_duration(w2Duration, w1Duration) or f_near_duration(w2Duration, 2.0 * w1Duration)
@@ -930,31 +1120,31 @@ f_redraw_candidate() =>
         if not na(lockedABar)
             aLine = line.new(lockedW5Bar, lockedW5Price, lockedABar, lockedAPrice, color=correctionLineColor, width=3)
             aStyle = lockedBullish ? label.style_label_up : label.style_label_down
-            aLabel = label.new(lockedABar, lockedAPrice, text="A", style=aStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed A pivot")
+            aLabel = label.new(lockedABar, lockedAPrice, text=f_locked_correction_label(0), style=aStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot")
             array.push(drawnLines, aLine)
             array.push(drawnLabels, aLabel)
         if not na(lockedBBar)
             bLine = line.new(lockedABar, lockedAPrice, lockedBBar, lockedBPrice, color=correctionLineColor, width=3)
             bStyle = lockedBullish ? label.style_label_down : label.style_label_up
-            bLabel = label.new(lockedBBar, lockedBPrice, text="B", style=bStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed B pivot")
+            bLabel = label.new(lockedBBar, lockedBPrice, text=f_locked_correction_label(1), style=bStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot")
             array.push(drawnLines, bLine)
             array.push(drawnLabels, bLabel)
         if not na(lockedCBar)
             cLine = line.new(lockedBBar, lockedBPrice, lockedCBar, lockedCPrice, color=correctionLineColor, width=3)
             cStyle = lockedBullish ? label.style_label_up : label.style_label_down
-            cLabel = label.new(lockedCBar, lockedCPrice, text="C", style=cStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | correction complete")
+            cLabel = label.new(lockedCBar, lockedCPrice, text=f_locked_correction_label(2), style=cStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | component complete")
             array.push(drawnLines, cLine)
             array.push(drawnLabels, cLabel)
         if not na(lockedDBar)
             dLine = line.new(lockedCBar, lockedCPrice, lockedDBar, lockedDPrice, color=correctionLineColor, width=3)
             dStyle = lockedBullish ? label.style_label_down : label.style_label_up
-            dLabel = label.new(lockedDBar, lockedDPrice, text="D", style=dStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed D pivot")
+            dLabel = label.new(lockedDBar, lockedDPrice, text=f_locked_correction_label(3), style=dStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot")
             array.push(drawnLines, dLine)
             array.push(drawnLabels, dLabel)
         if not na(lockedEBar)
             eLine = line.new(lockedDBar, lockedDPrice, lockedEBar, lockedEPrice, color=correctionLineColor, width=3)
             eStyle = lockedBullish ? label.style_label_up : label.style_label_down
-            eLabel = label.new(lockedEBar, lockedEPrice, text="E", style=eStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | triangle complete")
+            eLabel = label.new(lockedEBar, lockedEPrice, text=f_locked_correction_label(4), style=eStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | correction complete")
             array.push(drawnLines, eLine)
             array.push(drawnLabels, eLabel)
         if not na(lockedTriangleTargetNear) and not na(lockedTriangleTargetFar)
@@ -1142,13 +1332,34 @@ if changed
                     w1Index = f_index_for_bar(lockedW1Bar)
                     if w1Index >= 0 and latestIndex > w1Index
                         [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w1Index, latestIndex)
+                        [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w1Index, latestIndex, false)
+                        correctionTerminalIndex = latestIndex
+                        if complexConfirmed
+                            correctionConfirmed := true
+                            correctionAlternate := correctionPrimary
+                            correctionPrimary := complexPrimary
+                            bRatio := complexXRatio
+                            internalPattern := complexPattern
+                            internalCount := complexCount
+                            correctionReason := complexReason
+                            correctionTerminalIndex := complexTerminalIndex
+                        else if not correctionConfirmed and complexReason == "DOUBLE_CONFIRMATION_PENDING"
+                            correctionPrimary := complexPrimary
+                            bRatio := complexXRatio
+                            internalPattern := complexPattern
+                            internalCount := complexCount
+                            correctionReason := complexReason
+                            correctionTerminalIndex := complexTerminalIndex
+                        correctionBar = array.get(swingBars, correctionTerminalIndex)
+                        correctionPrice = array.get(swingPrices, correctionTerminalIndex)
+                        correctionType = array.get(swingTypes, correctionTerminalIndex)
                         retraceDenominator = math.abs(lockedW1Price - lockedBasePrice)
-                        retrace = lockedBullish ? f_ratio(lockedW1Price - latestPrice, retraceDenominator) : f_ratio(latestPrice - lockedW1Price, retraceDenominator)
-                        timeRatio = f_ratio(math.max(1, latestBar - lockedW1Bar), math.max(1, lockedW1Bar - lockedBaseBar))
+                        retrace = lockedBullish ? f_ratio(lockedW1Price - correctionPrice, retraceDenominator) : f_ratio(correctionPrice - lockedW1Price, retraceDenominator)
+                        timeRatio = f_ratio(math.max(1, correctionBar - lockedW1Bar), math.max(1, lockedW1Bar - lockedBaseBar))
                         w1Duration = math.max(1, lockedW1Bar - lockedBaseBar)
-                        w2Duration = math.max(1, latestBar - lockedW1Bar)
+                        w2Duration = math.max(1, correctionBar - lockedW1Bar)
                         timePass = f_w2_time_pass(w1Duration, w2Duration)
-                        correctSide = latestType == (lockedBullish ? -1 : 1)
+                        correctSide = correctionType == (lockedBullish ? -1 : 1)
                         microscopic = not na(retrace) and math.abs(retrace - microscopicRetrace) <= microscopicTolerance
                         normal = not na(retrace) and retrace >= f_w2_minimum() and retrace <= wave2MaxRetrace
                         deep = not na(retrace) and retrace >= 0.618 and retrace <= 0.812
@@ -1161,8 +1372,8 @@ if changed
                         alternatePattern := correctionAlternate
                         hpSignalState := deep and correctionConfirmed and hpSignalMode != "Disabled" ? (lockedBullish ? "HP BUY ELIGIBLE" : "HP SELL ELIGIBLE") : ""
                         if correctSide and correctionConfirmed and (normal or microscopic) and timePass
-                            lockedW2Bar := latestBar
-                            lockedW2Price := latestPrice
+                            lockedW2Bar := correctionBar
+                            lockedW2Price := correctionPrice
                             lockedW2Pattern := correctionPrimary
                             lockedW2Subtype := microscopic ? "W2_MICROSCOPIC" : "W2_NORMAL"
                             lockedW2InternalCount := internalCount
@@ -1233,6 +1444,8 @@ if changed
                     if w3Index >= 0 and latestIndex > w3Index
                         [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w3Index, latestIndex)
                         [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w3Index, latestIndex)
+                        [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w3Index, latestIndex, true)
+                        correctionTerminalIndex = latestIndex
                         if triangleConfirmed
                             correctionConfirmed := true
                             correctionAlternate := correctionPrimary
@@ -1240,16 +1453,36 @@ if changed
                             internalPattern := trianglePattern
                             internalCount := triangleCount
                             correctionReason := "TRIANGLE_CONFIRMED"
-                        retrace = f_ratio(math.abs(lockedW3Price - latestPrice), math.abs(lockedW3Price - lockedBasePrice))
-                        correctSide = latestType == (lockedBullish ? -1 : 1)
+                        if complexConfirmed
+                            correctionConfirmed := true
+                            correctionAlternate := correctionPrimary
+                            correctionPrimary := complexPrimary
+                            bRatio := complexXRatio
+                            internalPattern := complexPattern
+                            internalCount := complexCount
+                            correctionReason := complexReason
+                            correctionTerminalIndex := complexTerminalIndex
+                            triangleConfirmed := false
+                        else if not correctionConfirmed and complexReason == "DOUBLE_CONFIRMATION_PENDING"
+                            correctionPrimary := complexPrimary
+                            bRatio := complexXRatio
+                            internalPattern := complexPattern
+                            internalCount := complexCount
+                            correctionReason := complexReason
+                            correctionTerminalIndex := complexTerminalIndex
+                        correctionBar = array.get(swingBars, correctionTerminalIndex)
+                        correctionPrice = array.get(swingPrices, correctionTerminalIndex)
+                        correctionType = array.get(swingTypes, correctionTerminalIndex)
+                        retrace = f_ratio(math.abs(lockedW3Price - correctionPrice), math.abs(lockedW3Price - lockedBasePrice))
+                        correctSide = correctionType == (lockedBullish ? -1 : 1)
                         w3Terminal = str.contains(lockedW3Subtype, "TERMINAL")
                         maxRetrace = w3Terminal ? wave4TerminalMaxRetrace : wave4MaxRetrace
                         pricePass = not na(retrace) and retrace >= f_w4_minimum() and retrace <= maxRetrace
                         w2Duration = math.max(1, lockedW2Bar - lockedW1Bar)
                         w3Duration = math.max(1, lockedW3Bar - lockedW2Bar)
-                        w4Duration = math.max(1, latestBar - lockedW3Bar)
+                        w4Duration = math.max(1, correctionBar - lockedW3Bar)
                         timePass = f_w4_time_pass(w2Duration, w3Duration, w4Duration)
-                        overlap = lockedBullish ? latestPrice <= lockedW1Price : latestPrice >= lockedW1Price
+                        overlap = lockedBullish ? correctionPrice <= lockedW1Price : correctionPrice >= lockedW1Price
                         overlapInvalid = overlap and not w3Terminal
                         currentFibAnchor := "Base-P3 retracement"
                         currentFibValue := retrace
@@ -1267,15 +1500,15 @@ if changed
                             currentNextCondition := "Keep W4 container open or promote a valid terminal/diagonal alternate."
                             developingText := "4?"
                         else if correctionConfirmed and correctSide and pricePass and timePass
-                            lockedW4Bar := latestBar
-                            lockedW4Price := latestPrice
+                            lockedW4Bar := correctionBar
+                            lockedW4Price := correctionPrice
                             lockedW4Pattern := correctionPrimary
                             lockedW4Retrace := retrace
                             if triangleConfirmed
-                                lockedTriangleTargetNear := lockedBullish ? latestPrice + triangleThrustMin : latestPrice - triangleThrustMin
-                                lockedTriangleTargetFar := lockedBullish ? latestPrice + triangleThrustMax : latestPrice - triangleThrustMax
-                                lockedTriangleInvalidation := latestPrice
-                            currentTimeValue := f_ratio(math.max(1, latestBar - lockedW3Bar), math.max(1, lockedW2Bar - lockedW1Bar))
+                                lockedTriangleTargetNear := lockedBullish ? correctionPrice + triangleThrustMin : correctionPrice - triangleThrustMin
+                                lockedTriangleTargetFar := lockedBullish ? correctionPrice + triangleThrustMax : correctionPrice - triangleThrustMax
+                                lockedTriangleInvalidation := correctionPrice
+                            currentTimeValue := f_ratio(math.max(1, correctionBar - lockedW3Bar), math.max(1, lockedW2Bar - lockedW1Bar))
                             engineStage := "W5_FORMING"
                             candidateState := "CONFIRMED"
                             lastReasonCode := "W4_CONFIRMED"
@@ -1347,6 +1580,8 @@ if changed
                     if w5Index >= 0 and latestIndex > w5Index
                         [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w5Index, latestIndex)
                         [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w5Index, latestIndex)
+                        [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w5Index, latestIndex, true)
+                        correctionTerminalIndex = latestIndex
                         if triangleConfirmed
                             correctionConfirmed := true
                             correctionAlternate := correctionPrimary
@@ -1357,13 +1592,35 @@ if changed
                             correctionACount := triangleACount
                             correctionBCount := triangleBCount
                             correctionCCount := triangleCCount
-                        correctSide = latestType == (lockedBullish ? -1 : 1)
+                        if complexConfirmed
+                            correctionConfirmed := true
+                            correctionAlternate := correctionPrimary
+                            correctionPrimary := complexPrimary
+                            bRatio := complexXRatio
+                            internalPattern := complexPattern
+                            internalCount := complexCount
+                            correctionReason := complexReason
+                            correctionACount := complexWCount
+                            correctionBCount := complexXCount
+                            correctionCCount := complexYCount
+                            correctionTerminalIndex := complexTerminalIndex
+                            triangleConfirmed := false
+                        else if not correctionConfirmed and complexReason == "DOUBLE_CONFIRMATION_PENDING"
+                            correctionPrimary := complexPrimary
+                            bRatio := complexXRatio
+                            internalPattern := complexPattern
+                            internalCount := complexCount
+                            correctionReason := complexReason
+                            correctionTerminalIndex := complexTerminalIndex
+                        correctionTerminalPrice = array.get(swingPrices, correctionTerminalIndex)
+                        correctionTerminalType = array.get(swingTypes, correctionTerminalIndex)
+                        correctSide = correctionTerminalType == (lockedBullish ? -1 : 1)
                         primaryPattern := correctionPrimary
                         alternatePattern := correctionAlternate
                         currentInternalPattern := internalPattern
                         currentInternalCount := internalCount
                         currentFibAnchor := "Wave 5 correction origin"
-                        currentFibValue := bRatio
+                        currentFibValue := correctionPrimary == "W-X-Y-XX-Z" ? complexZProjection : correctionPrimary == "W-X-Y" ? complexYProjection : bRatio
                         if correctionConfirmed and correctSide
                             aIndex = w5Index + correctionACount
                             bIndex = aIndex + correctionBCount
@@ -1371,8 +1628,8 @@ if changed
                             lockedAPrice := array.get(swingPrices, aIndex)
                             lockedBBar := array.get(swingBars, bIndex)
                             lockedBPrice := array.get(swingPrices, bIndex)
-                            lockedCBar := latestBar
-                            lockedCPrice := latestPrice
+                            lockedCBar := array.get(swingBars, correctionTerminalIndex)
+                            lockedCPrice := correctionTerminalPrice
                             if triangleConfirmed
                                 cIndex = bIndex + triangleCCount
                                 dIndex = cIndex + triangleDCount
@@ -1385,11 +1642,20 @@ if changed
                                 lockedTriangleTargetNear := lockedBullish ? latestPrice + triangleThrustMin : latestPrice - triangleThrustMin
                                 lockedTriangleTargetFar := lockedBullish ? latestPrice + triangleThrustMax : latestPrice - triangleThrustMax
                                 lockedTriangleInvalidation := latestPrice
+                            else if correctionPrimary == "W-X-Y-XX-Z"
+                                yIndex = bIndex + correctionCCount
+                                xxIndex = yIndex + complexXXCount
+                                lockedCBar := array.get(swingBars, yIndex)
+                                lockedCPrice := array.get(swingPrices, yIndex)
+                                lockedDBar := array.get(swingBars, xxIndex)
+                                lockedDPrice := array.get(swingPrices, xxIndex)
+                                lockedEBar := array.get(swingBars, correctionTerminalIndex)
+                                lockedEPrice := correctionTerminalPrice
                             lockedCorrectionPattern := correctionPrimary
                             engineStage := "CORRECTION_CONFIRMED"
                             candidateState := "CONFIRMED"
                             lastReasonCode := "CORRECTION_COMPLETE"
-                            currentNextCondition := "The 1-2-3-4-5 then A-B-C cycle is complete; wait for the next qualified Point 0."
+                            currentNextCondition := "The 1-2-3-4-5 then " + correctionPrimary + " cycle is complete; wait for the next qualified Point 0."
                             developingText := ""
                             transitionConfirmed := true
                         else
