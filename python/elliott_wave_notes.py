@@ -2097,6 +2097,8 @@ def _evaluate_simple_correction(
     candidates: list[dict[str, object]] = []
     impulse_counts = cfg.w1_internal_move_counts
     correction_counts = (3, 7, 11)
+    saw_b_time_failure = False
+    saw_c_time_failure = False
 
     for a_count in impulse_counts:
         for b_count in correction_counts:
@@ -2106,14 +2108,29 @@ def _evaluate_simple_correction(
                 candidate = _correction_ratios(
                     swings, start_idx, a_count, b_count, c_count
                 )
-                if (
+                price_pass = (
                     0.01 <= candidate["b_ratio"] <= 0.618
                     and 0.618 <= candidate["c_vs_a"] <= 4.618
-                ):
+                )
+                timing = _simple_correction_timing(
+                    swings, start_idx, a_count, b_count, end_idx, cfg
+                )
+                if price_pass and not timing["b_time_pass"]:
+                    saw_b_time_failure = True
+                elif price_pass and not timing["c_time_pass"]:
+                    saw_c_time_failure = True
+                if price_pass and timing["b_time_pass"] and timing["c_time_pass"]:
+                    subtype = (
+                        "ZIG_ZAG_NORMAL"
+                        if candidate["c_vs_a"] <= 1.618
+                        else "ZIG_ZAG_ELONGATED"
+                    )
                     candidates.append(
                         {
                             **candidate,
+                            **timing,
                             "pattern": "Zig-Zag",
+                            "subtype": subtype,
                             "internal_pattern": f"{a_count}-{b_count}-{c_count}",
                             "a_count": a_count,
                             "b_count": b_count,
@@ -2134,14 +2151,36 @@ def _evaluate_simple_correction(
                 candidate = _correction_ratios(
                     swings, start_idx, a_count, b_count, c_count
                 )
-                if (
+                price_pass = (
                     cfg.flat_b_min_retrace <= candidate["b_ratio"] <= cfg.flat_b_max_retrace
                     and 0.618 <= candidate["c_vs_a"] <= 2.618
-                ):
+                )
+                timing = _simple_correction_timing(
+                    swings, start_idx, a_count, b_count, end_idx, cfg
+                )
+                if price_pass and not timing["b_time_pass"]:
+                    saw_b_time_failure = True
+                elif price_pass and not timing["c_time_pass"]:
+                    saw_c_time_failure = True
+                if price_pass and timing["b_time_pass"] and timing["c_time_pass"]:
+                    if candidate["b_ratio"] <= 0.812:
+                        subtype = (
+                            "FLAT_NORMAL"
+                            if candidate["c_vs_a"] <= 1.618
+                            else "FLAT_ELONGATED"
+                        )
+                    else:
+                        subtype = (
+                            "FLAT_STRONG_IRREGULAR"
+                            if candidate["c_vs_a"] <= 1.618
+                            else "FLAT_RUNNING"
+                        )
                     candidates.append(
                         {
                             **candidate,
+                            **timing,
                             "pattern": "Flat",
+                            "subtype": subtype,
                             "internal_pattern": f"{a_count}-{b_count}-{c_count}",
                             "a_count": a_count,
                             "b_count": b_count,
@@ -2161,7 +2200,7 @@ def _evaluate_simple_correction(
             "confirmed": True,
             "primary": primary["pattern"],
             "alternate": alternate,
-            "subtype": f"{str(primary['pattern']).upper().replace('-', '_')}_COMPLETE",
+            "subtype": primary["subtype"],
             "b_ratio": primary["b_ratio"],
             "c_vs_a": primary["c_vs_a"],
             "c_vs_b": primary["c_vs_b"],
@@ -2178,9 +2217,15 @@ def _evaluate_simple_correction(
             "internal_pattern": primary["internal_pattern"],
             "internal_count": end_idx - start_idx,
             "reason_code": "CORRECTION_CONFIRMED",
+            "time_values": {
+                "A": primary["a_duration"],
+                "B": primary["b_duration"],
+                "C": primary["c_duration"],
+            },
             "note": (
-                f"{primary['pattern']} {primary['internal_pattern']} passes; "
-                f"B={primary['b_ratio']:.2%}, C/A={primary['c_vs_a']:.2%}."
+                f"{primary['subtype']} {primary['internal_pattern']} passes; "
+                f"B={primary['b_ratio']:.2%}, C/A={primary['c_vs_a']:.2%}; "
+                f"B/C time gates=PASS."
             ),
         }
 
@@ -2189,7 +2234,15 @@ def _evaluate_simple_correction(
         a = swings[start_idx + 3]
         b = swings[start_idx + 6]
         b_ratio = _safe_ratio(abs(b.price - a.price), abs(a.price - swings[start_idx].price))
-    reason = "FLAT_B_GT_111" if np.isfinite(b_ratio) and b_ratio > cfg.flat_b_max_retrace else "C_INTERNAL_INCOMPLETE"
+    reason = (
+        "FLAT_B_GT_111"
+        if np.isfinite(b_ratio) and b_ratio > cfg.flat_b_max_retrace
+        else "B_TIME_GATE_FAIL"
+        if saw_b_time_failure
+        else "C_TIME_GATE_FAIL"
+        if saw_c_time_failure
+        else "C_INTERNAL_INCOMPLETE"
+    )
     return {
         "confirmed": False,
         "primary": "Zig-Zag / Flat",
@@ -2207,7 +2260,48 @@ def _evaluate_simple_correction(
         "internal_pattern": "parallel candidates",
         "internal_count": max(0, end_idx - start_idx),
         "reason_code": reason,
-        "note": "Parallel Zig-Zag and Flat candidates remain forming; required internal counts/Fib gates are incomplete.",
+        "note": (
+            "Parallel Zig-Zag and Flat candidates remain forming; required "
+            "internal counts, Fib gates, or mandatory B/C time gates are incomplete."
+        ),
+    }
+
+
+def _simple_correction_timing(
+    swings: list[_Swing],
+    start_idx: int,
+    a_count: int,
+    b_count: int,
+    end_idx: int,
+    cfg: ElliottWaveConfig,
+) -> dict[str, object]:
+    """Return the V4 mandatory OR time gates for a simple ABC correction."""
+
+    a_idx = start_idx + a_count
+    b_idx = a_idx + b_count
+    a_duration = max(1, swings[a_idx].position - swings[start_idx].position)
+    b_duration = max(1, swings[b_idx].position - swings[a_idx].position)
+    c_duration = max(1, swings[end_idx].position - swings[b_idx].position)
+    ab_duration = a_duration + b_duration
+    b_targets = (
+        float(a_duration),
+        2.0 * a_duration,
+        5.0 * a_duration,
+        10.0 * a_duration,
+    )
+    c_targets = (0.25 * ab_duration, 0.50 * ab_duration, float(ab_duration))
+    return {
+        "a_duration": a_duration,
+        "b_duration": b_duration,
+        "c_duration": c_duration,
+        "b_time_pass": _matches_absolute_time_targets(
+            b_duration, b_targets, cfg.time_tolerance_bars
+        ),
+        "c_time_pass": _matches_absolute_time_targets(
+            c_duration, c_targets, cfg.time_tolerance_bars
+        ),
+        "time_error": min(abs(b_duration - target) for target in b_targets)
+        + min(abs(c_duration - target) for target in c_targets),
     }
 
 

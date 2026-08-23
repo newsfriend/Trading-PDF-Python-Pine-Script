@@ -50,6 +50,23 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertIn("bRatio >= flatBMinRetrace", self.source)
         self.assertIn("bRatio <= flatBMaxRetrace", self.source)
 
+    def test_simple_corrections_use_mandatory_time_gates_and_subtypes(self):
+        for token in (
+            "bTimePass",
+            "cTimePass",
+            "10.0 * aDuration",
+            "0.25 * abDuration",
+            '"B_TIME_GATE_FAIL"',
+            '"C_TIME_GATE_FAIL"',
+            '"ZIG_ZAG_NORMAL"',
+            '"ZIG_ZAG_ELONGATED"',
+            '"FLAT_NORMAL"',
+            '"FLAT_ELONGATED"',
+            '"FLAT_STRONG_IRREGULAR"',
+            '"FLAT_RUNNING"',
+        ):
+            self.assertIn(token, self.source)
+
     def test_locked_main_labels_include_complete_impulse(self):
         for label in ('text="2"', 'text="3"', 'text="4"', 'text="5"'):
             self.assertIn(label, self.source)

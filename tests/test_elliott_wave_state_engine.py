@@ -10,6 +10,7 @@ from python.elliott_wave_notes import (
     _run_candidate_state,
     _evaluate_correction,
     _evaluate_double_correction,
+    _evaluate_simple_correction,
     _evaluate_triple_correction,
     _evaluate_triangle_correction,
     _with_indicators,
@@ -237,10 +238,10 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         delayed = swings[-1]
         swings[-1] = replace(
             delayed,
-            position=40,
-            confirmed_position=41,
-            index=pd.Timestamp("2025-02-10"),
-            confirmed_index=pd.Timestamp("2025-02-11"),
+            position=25,
+            confirmed_position=26,
+            index=pd.Timestamp("2025-01-26"),
+            confirmed_index=pd.Timestamp("2025-01-27"),
         )
         state = _run_candidate_state(swings, self.config)
 
@@ -254,10 +255,10 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         swings[-1] = replace(
             delayed,
             price=20.0,
-            position=40,
-            confirmed_position=41,
-            index=pd.Timestamp("2025-02-10"),
-            confirmed_index=pd.Timestamp("2025-02-11"),
+            position=25,
+            confirmed_position=26,
+            index=pd.Timestamp("2025-01-26"),
+            confirmed_index=pd.Timestamp("2025-01-27"),
         )
         state = _run_candidate_state(swings, self.config)
         final_event = state["events"][-1]["values"]
@@ -273,10 +274,10 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         bullish[-1] = replace(
             delayed,
             price=20.0,
-            position=40,
-            confirmed_position=41,
-            index=pd.Timestamp("2025-02-10"),
-            confirmed_index=pd.Timestamp("2025-02-11"),
+            position=25,
+            confirmed_position=26,
+            index=pd.Timestamp("2025-01-26"),
+            confirmed_index=pd.Timestamp("2025-01-27"),
         )
         state = _run_candidate_state(_mirror_bearish(bullish), self.config)
         final_event = state["events"][-1]["values"]
@@ -316,6 +317,63 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(state["active"]["parent_state"], "W2_CORRECTION_CONTAINER")
         self.assertNotIn("2", state["active"]["waves"])
         self.assertEqual(state["last_reason_code"], "FLAT_B_GT_111")
+
+    def test_v4_simple_correction_requires_exact_b_and_c_time_families(self):
+        cfg = replace(self.config, time_tolerance_bars=0)
+        swings = [_swing(0, 100, 1)]
+        _append_prices(swings, [94, 97, 88, 92, 80])
+        _append_prices(swings, [86, 83, 90])
+        _append_prices(swings, [84, 88, 78, 82, 70])
+
+        exact_positions = list(range(0, 8)) + [10, 11, 12, 13, 14, 15]
+        exact = [
+            replace(swing, position=position, confirmed_position=position + 1)
+            for swing, position in zip(swings, exact_positions)
+        ]
+        correction = _evaluate_simple_correction(exact, 0, len(exact) - 1, cfg)
+        self.assertTrue(correction["confirmed"])
+        self.assertEqual(correction["time_values"], {"A": 5, "B": 5, "C": 5})
+
+        b_late_positions = list(range(0, 8)) + [9, 10, 11, 12, 13, 14]
+        b_late = [
+            replace(swing, position=position, confirmed_position=position + 1)
+            for swing, position in zip(swings, b_late_positions)
+        ]
+        correction = _evaluate_simple_correction(b_late, 0, len(b_late) - 1, cfg)
+        self.assertFalse(correction["confirmed"])
+        self.assertEqual(correction["reason_code"], "B_TIME_GATE_FAIL")
+
+        c_late = list(exact)
+        c_late[-1] = replace(c_late[-1], position=16, confirmed_position=17)
+        correction = _evaluate_simple_correction(c_late, 0, len(c_late) - 1, cfg)
+        self.assertFalse(correction["confirmed"])
+        self.assertEqual(correction["reason_code"], "C_TIME_GATE_FAIL")
+
+    def test_v4_simple_correction_classifies_zig_zag_and_flat_subtypes(self):
+        zig = _through_w2()
+        normal = _evaluate_simple_correction(zig, 5, len(zig) - 1, self.config)
+        self.assertEqual(normal["subtype"], "ZIG_ZAG_NORMAL")
+        zig[-1] = replace(zig[-1], price=35.0)
+        elongated = _evaluate_simple_correction(zig, 5, len(zig) - 1, self.config)
+        self.assertEqual(elongated["subtype"], "ZIG_ZAG_ELONGATED")
+
+        cases = (
+            (94.0, 60.0, "FLAT_NORMAL"),
+            (94.0, 40.0, "FLAT_ELONGATED"),
+            (97.0, 55.0, "FLAT_STRONG_IRREGULAR"),
+            (97.0, 40.0, "FLAT_RUNNING"),
+        )
+        for b_end, c_end, expected in cases:
+            with self.subTest(expected=expected):
+                swings = [_swing(0, 100, 1)]
+                _append_prices(swings, [90, 95, 70])
+                _append_prices(swings, [82, 76, b_end])
+                _append_prices(swings, [85, 92, 70, 80, c_end])
+                correction = _evaluate_simple_correction(
+                    swings, 0, len(swings) - 1, self.config
+                )
+                self.assertTrue(correction["confirmed"])
+                self.assertEqual(correction["subtype"], expected)
 
     def test_t04_origin_break_invalidates_and_starts_controlled_recount(self):
         swings = _confirmed_wave1() + [_swing(6, -1, -1)]

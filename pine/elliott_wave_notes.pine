@@ -367,6 +367,9 @@ f_eval_simple_correction(startIndex, endIndex) =>
     selectedACount = 0
     selectedBCount = 0
     selectedCCount = 0
+    selectedSubtype = "SIMPLE_CORRECTION_FORMING"
+    sawBTimeFailure = false
+    sawCTimeFailure = false
     if startIndex >= 0 and endIndex > startIndex
         for aOption = 0 to 4
             aCount = f_impulse_count(aOption)
@@ -376,11 +379,23 @@ f_eval_simple_correction(startIndex, endIndex) =>
                     cCount = f_impulse_count(cOption)
                     if startIndex + aCount + bCount + cCount == endIndex
                         [bRatio, cVsA, cVsB] = f_correction_ratios(startIndex, aCount, bCount, cCount)
-                        zigPass = not na(bRatio) and bRatio >= 0.01 and bRatio <= 0.618 and not na(cVsA) and cVsA >= 0.618 and cVsA <= 4.618
+                        aIndex = startIndex + aCount
+                        bIndex = aIndex + bCount
+                        aDuration = math.max(1, array.get(swingBars, aIndex) - array.get(swingBars, startIndex))
+                        bDuration = math.max(1, array.get(swingBars, bIndex) - array.get(swingBars, aIndex))
+                        cDuration = math.max(1, array.get(swingBars, endIndex) - array.get(swingBars, bIndex))
+                        abDuration = aDuration + bDuration
+                        bTimePass = math.abs(bDuration - aDuration) <= timeToleranceBars or math.abs(bDuration - 2.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 5.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 10.0 * aDuration) <= timeToleranceBars
+                        cTimePass = math.abs(cDuration - 0.25 * abDuration) <= timeToleranceBars or math.abs(cDuration - 0.50 * abDuration) <= timeToleranceBars or math.abs(cDuration - abDuration) <= timeToleranceBars
+                        zigPricePass = not na(bRatio) and bRatio >= 0.01 and bRatio <= 0.618 and not na(cVsA) and cVsA >= 0.618 and cVsA <= 4.618
+                        sawBTimeFailure := sawBTimeFailure or (zigPricePass and not bTimePass)
+                        sawCTimeFailure := sawCTimeFailure or (zigPricePass and bTimePass and not cTimePass)
+                        zigPass = zigPricePass and bTimePass and cTimePass
                         if zigPass
                             if not confirmed
                                 confirmed := true
                                 primary := "Zig-Zag"
+                                selectedSubtype := cVsA <= 1.618 ? "ZIG_ZAG_NORMAL" : "ZIG_ZAG_ELONGATED"
                                 selectedBRatio := bRatio
                                 internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount)
                                 selectedACount := aCount
@@ -397,11 +412,23 @@ f_eval_simple_correction(startIndex, endIndex) =>
                     cCount = f_impulse_count(cOption)
                     if startIndex + aCount + bCount + cCount == endIndex
                         [bRatio, cVsA, cVsB] = f_correction_ratios(startIndex, aCount, bCount, cCount)
-                        flatPass = not na(bRatio) and bRatio >= flatBMinRetrace and bRatio <= flatBMaxRetrace and not na(cVsA) and cVsA >= 0.618 and cVsA <= 2.618
+                        aIndex = startIndex + aCount
+                        bIndex = aIndex + bCount
+                        aDuration = math.max(1, array.get(swingBars, aIndex) - array.get(swingBars, startIndex))
+                        bDuration = math.max(1, array.get(swingBars, bIndex) - array.get(swingBars, aIndex))
+                        cDuration = math.max(1, array.get(swingBars, endIndex) - array.get(swingBars, bIndex))
+                        abDuration = aDuration + bDuration
+                        bTimePass = math.abs(bDuration - aDuration) <= timeToleranceBars or math.abs(bDuration - 2.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 5.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 10.0 * aDuration) <= timeToleranceBars
+                        cTimePass = math.abs(cDuration - 0.25 * abDuration) <= timeToleranceBars or math.abs(cDuration - 0.50 * abDuration) <= timeToleranceBars or math.abs(cDuration - abDuration) <= timeToleranceBars
+                        flatPricePass = not na(bRatio) and bRatio >= flatBMinRetrace and bRatio <= flatBMaxRetrace and not na(cVsA) and cVsA >= 0.618 and cVsA <= 2.618
+                        sawBTimeFailure := sawBTimeFailure or (flatPricePass and not bTimePass)
+                        sawCTimeFailure := sawCTimeFailure or (flatPricePass and bTimePass and not cTimePass)
+                        flatPass = flatPricePass and bTimePass and cTimePass
                         if flatPass
                             if not confirmed
                                 confirmed := true
                                 primary := "Flat"
+                                selectedSubtype := bRatio <= 0.812 ? (cVsA <= 1.618 ? "FLAT_NORMAL" : "FLAT_ELONGATED") : (cVsA <= 1.618 ? "FLAT_STRONG_IRREGULAR" : "FLAT_RUNNING")
                                 selectedBRatio := bRatio
                                 internalPattern := str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount)
                                 selectedACount := aCount
@@ -417,7 +444,9 @@ f_eval_simple_correction(startIndex, endIndex) =>
             selectedBRatio := f_ratio(math.abs(bPrice - aPrice), math.abs(aPrice - startPrice))
             if not na(selectedBRatio) and selectedBRatio > flatBMaxRetrace
                 reason := "FLAT_B_GT_111"
-    [confirmed, primary, alternate, selectedBRatio, internalPattern, math.max(0, endIndex - startIndex), reason, selectedACount, selectedBCount, selectedCCount]
+        if not confirmed and reason != "FLAT_B_GT_111"
+            reason := sawBTimeFailure ? "B_TIME_GATE_FAIL" : sawCTimeFailure ? "C_TIME_GATE_FAIL" : reason
+    [confirmed, primary, alternate, selectedSubtype, selectedBRatio, internalPattern, math.max(0, endIndex - startIndex), reason, selectedACount, selectedBCount, selectedCCount]
 
 f_eval_triangle(startIndex, endIndex) =>
     confirmed = false
@@ -501,7 +530,7 @@ f_connector_count(optionIndex) =>
     optionIndex == 0 ? 1 : optionIndex == 1 ? 3 : optionIndex == 2 ? 7 : 11
 
 f_eval_component(startIndex, endIndex, allowTriangle) =>
-    [simpleConfirmed, simplePrimary, simpleAlternate, simpleBRatio, simplePattern, simpleCount, simpleReason, simpleA, simpleB, simpleC] = f_eval_simple_correction(startIndex, endIndex)
+    [simpleConfirmed, simplePrimary, simpleAlternate, simpleSubtype, simpleBRatio, simplePattern, simpleCount, simpleReason, simpleA, simpleB, simpleC] = f_eval_simple_correction(startIndex, endIndex)
     [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleA, triangleB, triangleC, triangleD, triangleE, triangleThrustMin, triangleThrustMax] = f_eval_triangle(startIndex, endIndex)
     useTriangle = allowTriangle and triangleConfirmed
     [useTriangle or simpleConfirmed, useTriangle ? "Triangle" : simplePrimary, useTriangle ? trianglePattern : simplePattern]
@@ -1337,7 +1366,7 @@ if changed
                 if engineStage == "W2_CORRECTION_CONTAINER"
                     w1Index = f_index_for_bar(lockedW1Bar)
                     if w1Index >= 0 and latestIndex > w1Index
-                        [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w1Index, latestIndex)
+                        [correctionConfirmed, correctionPrimary, correctionAlternate, correctionSubtype, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w1Index, latestIndex)
                         [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w1Index, latestIndex, false)
                         correctionTerminalIndex = latestIndex
                         if complexConfirmed
@@ -1448,7 +1477,7 @@ if changed
                 else if engineStage == "W4_CORRECTION_CONTAINER"
                     w3Index = f_index_for_bar(lockedW3Bar)
                     if w3Index >= 0 and latestIndex > w3Index
-                        [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w3Index, latestIndex)
+                        [correctionConfirmed, correctionPrimary, correctionAlternate, correctionSubtype, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w3Index, latestIndex)
                         [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w3Index, latestIndex)
                         [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w3Index, latestIndex, true)
                         correctionTerminalIndex = latestIndex
@@ -1584,7 +1613,7 @@ if changed
                 else if engineStage == "LARGER_CORRECTION_CONTAINER"
                     w5Index = f_index_for_bar(lockedW5Bar)
                     if w5Index >= 0 and latestIndex > w5Index
-                        [correctionConfirmed, correctionPrimary, correctionAlternate, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w5Index, latestIndex)
+                        [correctionConfirmed, correctionPrimary, correctionAlternate, correctionSubtype, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w5Index, latestIndex)
                         [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w5Index, latestIndex)
                         [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w5Index, latestIndex, true)
                         correctionTerminalIndex = latestIndex
