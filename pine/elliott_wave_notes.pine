@@ -503,9 +503,11 @@ f_eval_simple_correction(startIndex, endIndex) =>
             reason := sawBTimeFailure ? "B_TIME_GATE_FAIL" : sawCTimeFailure ? "C_TIME_GATE_FAIL" : reason
     [confirmed, primary, alternate, selectedSubtype, selectedBRatio, internalPattern, math.max(0, endIndex - startIndex), reason, selectedACount, selectedBCount, selectedCCount]
 
-f_eval_triangle(startIndex, endIndex) =>
+f_eval_triangle(startIndex, endIndex, requireBreak) =>
     confirmed = false
+    foundStructure = false
     subtype = "TRIANGLE_FORMING"
+    reason = "TRIANGLE_GEOMETRY_PENDING"
     internalPattern = "3/7/11 corrective legs"
     selectedA = 0
     selectedB = 0
@@ -514,6 +516,8 @@ f_eval_triangle(startIndex, endIndex) =>
     selectedE = 0
     thrustMin = float(na)
     thrustMax = float(na)
+    terminalIndex = endIndex
+    confirmationIndex = endIndex
     if startIndex >= 0 and endIndex > startIndex
         for aOption = 0 to 2
             aCount = f_correction_count_option(aOption)
@@ -525,7 +529,8 @@ f_eval_triangle(startIndex, endIndex) =>
                         dCount = f_correction_count_option(dOption)
                         for eOption = 0 to 2
                             eCount = f_correction_count_option(eOption)
-                            if not confirmed and startIndex + aCount + bCount + cCount + dCount + eCount == endIndex
+                            candidateTerminal = startIndex + aCount + bCount + cCount + dCount + eCount
+                            if not foundStructure and candidateTerminal <= endIndex
                                 aIndex = startIndex + aCount
                                 bIndex = aIndex + bCount
                                 cIndex = bIndex + cCount
@@ -555,8 +560,44 @@ f_eval_triangle(startIndex, endIndex) =>
                                 expandingRunning = bLen > aLen and cLen < bLen and dLen > cLen and eLen > dLen and eLen >= math.max(math.max(aLen, bLen), math.max(cLen, dLen)) and sameDirection
                                 shapePass = retracePasses >= 3 and (contractingHorizontal or contractingIrregular or contractingRunning or expandingHorizontal or expandingIrregular or expandingRunning)
                                 if shapePass
-                                    confirmed := true
-                                    subtype := contractingHorizontal ? "HORIZONTAL_CONTRACTING" : contractingIrregular ? "IRREGULAR_CONTRACTING" : contractingRunning ? "RUNNING_CONTRACTING" : expandingHorizontal ? "HORIZONTAL_EXPANDING" : expandingIrregular ? "IRREGULAR_EXPANDING" : "RUNNING_EXPANDING"
+                                    candidateSubtype = contractingHorizontal ? "HORIZONTAL_CONTRACTING" : contractingIrregular ? "IRREGULAR_CONTRACTING" : contractingRunning ? "RUNNING_CONTRACTING" : expandingHorizontal ? "HORIZONTAL_EXPANDING" : expandingIrregular ? "IRREGULAR_EXPANDING" : "RUNNING_EXPANDING"
+                                    acTouches = 0
+                                    bdTouches = 0
+                                    aBar = array.get(swingBars, aIndex)
+                                    bBar = array.get(swingBars, bIndex)
+                                    cBar = array.get(swingBars, cIndex)
+                                    dBar = array.get(swingBars, dIndex)
+                                    eBar = array.get(swingBars, eIndex)
+                                    for touchIndex = startIndex to eIndex
+                                        touchBar = array.get(swingBars, touchIndex)
+                                        touchPrice = array.get(swingPrices, touchIndex)
+                                        touchTolerance = 0.25 * array.get(swingAtr, touchIndex)
+                                        acValue = pA + acSlope * (touchBar - aBar)
+                                        bdValue = pB + bdSlope * (touchBar - bBar)
+                                        acTouches += math.abs(touchPrice - acValue) <= math.max(touchTolerance, 0.000000001) ? 1 : 0
+                                        bdTouches += math.abs(touchPrice - bdValue) <= math.max(touchTolerance, 0.000000001) ? 1 : 0
+                                    apexDenominator = acSlope - bdSlope
+                                    apexPosition = math.abs(apexDenominator) > 0.000000000001 ? (pB - pA + acSlope * aBar - bdSlope * bBar) / apexDenominator : na
+                                    longestDuration = math.max(math.max(aBar - array.get(swingBars, startIndex), bBar - aBar), math.max(math.max(cBar - bBar, dBar - cBar), eBar - dBar))
+                                    apexPass = candidateSubtype != "HORIZONTAL_CONTRACTING" or (not na(apexPosition) and apexPosition >= eBar and apexPosition <= eBar + 0.618 * longestDuration)
+                                    touchPass = acTouches <= 5 and bdTouches <= 5
+                                    breakConfirmed = not requireBreak
+                                    if requireBreak and endIndex > eIndex
+                                        firstObservedBar = math.max(eBar + 1, bar_index - 4999)
+                                        lastObservedBar = bar_index
+                                        if lastObservedBar >= firstObservedBar
+                                            for observedBar = firstObservedBar to lastObservedBar
+                                                if not breakConfirmed
+                                                    observedClose = close[bar_index - observedBar]
+                                                    bdValue = pB + bdSlope * (observedBar - bBar)
+                                                    breakConfirmed := array.get(swingTypes, eIndex) == -1 ? observedClose > bdValue : observedClose < bdValue
+                                    if apexPass and touchPass
+                                        foundStructure := true
+                                        confirmed := breakConfirmed
+                                        subtype := candidateSubtype
+                                        reason := breakConfirmed ? "TRIANGLE_CONFIRMED" : "TRIANGLE_BD_BREAK_PENDING"
+                                        terminalIndex := eIndex
+                                        confirmationIndex := breakConfirmed ? endIndex : eIndex
                                     contracting = contractingHorizontal or contractingIrregular or contractingRunning
                                     widest = math.max(math.max(aLen, bLen), math.max(math.max(cLen, dLen), eLen))
                                     thrustBase = contracting ? widest : eLen
@@ -568,7 +609,7 @@ f_eval_triangle(startIndex, endIndex) =>
                                     selectedC := cCount
                                     selectedD := dCount
                                     selectedE := eCount
-    [confirmed, subtype, internalPattern, math.max(0, endIndex - startIndex), selectedA, selectedB, selectedC, selectedD, selectedE, thrustMin, thrustMax]
+    [confirmed, subtype, internalPattern, math.max(0, terminalIndex - startIndex), reason, selectedA, selectedB, selectedC, selectedD, selectedE, thrustMin, thrustMax, terminalIndex, confirmationIndex]
 
 f_duration_ratio(startIndex, endIndex, referenceStartIndex, referenceEndIndex) =>
     duration = math.max(1, array.get(swingBars, endIndex) - array.get(swingBars, startIndex))
@@ -586,9 +627,12 @@ f_connector_count(optionIndex) =>
 
 f_eval_component(startIndex, endIndex, allowTriangle) =>
     [simpleConfirmed, simplePrimary, simpleAlternate, simpleSubtype, simpleBRatio, simplePattern, simpleCount, simpleReason, simpleA, simpleB, simpleC] = f_eval_simple_correction(startIndex, endIndex)
-    [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleA, triangleB, triangleC, triangleD, triangleE, triangleThrustMin, triangleThrustMax] = f_eval_triangle(startIndex, endIndex)
+    [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleReason, triangleA, triangleB, triangleC, triangleD, triangleE, triangleThrustMin, triangleThrustMax, triangleTerminalIndex, triangleConfirmationIndex] = f_eval_triangle(startIndex, endIndex, false)
     useTriangle = allowTriangle and triangleConfirmed
     [useTriangle or simpleConfirmed, useTriangle ? "Triangle" : simplePrimary, useTriangle ? trianglePattern : simplePattern]
+
+f_correction_rank(pattern) =>
+    pattern == "W-X-Y-XX-Z" ? 12 : pattern == "W-X-Y" ? 8 : pattern == "Triangle" ? 7 : pattern == "Zig-Zag" or pattern == "Flat" ? 4 : 0
 
 f_double_post_y_confirmation(startIndex, xIndex, yIndex, endIndex) =>
     confirmed = false
@@ -1425,7 +1469,7 @@ if changed
                         [correctionConfirmed, correctionPrimary, correctionAlternate, correctionSubtype, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w1Index, latestIndex)
                         [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w1Index, latestIndex, false)
                         correctionTerminalIndex = latestIndex
-                        if complexConfirmed
+                        if complexConfirmed and f_correction_rank(complexPrimary) > f_correction_rank(correctionPrimary)
                             correctionConfirmed := true
                             correctionAlternate := correctionPrimary
                             correctionPrimary := complexPrimary
@@ -1534,7 +1578,7 @@ if changed
                     w3Index = f_index_for_bar(lockedW3Bar)
                     if w3Index >= 0 and latestIndex > w3Index
                         [correctionConfirmed, correctionPrimary, correctionAlternate, correctionSubtype, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w3Index, latestIndex)
-                        [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w3Index, latestIndex)
+                        [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleReason, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax, triangleTerminalIndex, triangleConfirmationIndex] = f_eval_triangle(w3Index, latestIndex, true)
                         [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w3Index, latestIndex, true)
                         correctionTerminalIndex = latestIndex
                         if triangleConfirmed
@@ -1543,8 +1587,15 @@ if changed
                             correctionPrimary := "Triangle"
                             internalPattern := trianglePattern
                             internalCount := triangleCount
-                            correctionReason := "TRIANGLE_CONFIRMED"
-                        if complexConfirmed
+                            correctionReason := triangleReason
+                            correctionTerminalIndex := triangleTerminalIndex
+                        else if not correctionConfirmed and triangleReason == "TRIANGLE_BD_BREAK_PENDING"
+                            correctionPrimary := "Triangle"
+                            internalPattern := trianglePattern
+                            internalCount := triangleCount
+                            correctionReason := triangleReason
+                            correctionTerminalIndex := triangleTerminalIndex
+                        if complexConfirmed and f_correction_rank(complexPrimary) > f_correction_rank(correctionPrimary)
                             correctionConfirmed := true
                             correctionAlternate := correctionPrimary
                             correctionPrimary := complexPrimary
@@ -1672,7 +1723,7 @@ if changed
                     w5Index = f_index_for_bar(lockedW5Bar)
                     if w5Index >= 0 and latestIndex > w5Index
                         [correctionConfirmed, correctionPrimary, correctionAlternate, correctionSubtype, bRatio, internalPattern, internalCount, correctionReason, correctionACount, correctionBCount, correctionCCount] = f_eval_simple_correction(w5Index, latestIndex)
-                        [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax] = f_eval_triangle(w5Index, latestIndex)
+                        [triangleConfirmed, triangleSubtype, trianglePattern, triangleCount, triangleReason, triangleACount, triangleBCount, triangleCCount, triangleDCount, triangleECount, triangleThrustMin, triangleThrustMax, triangleTerminalIndex, triangleConfirmationIndex] = f_eval_triangle(w5Index, latestIndex, true)
                         [complexConfirmed, complexPrimary, complexSubtype, complexXRatio, complexYProjection, complexXXRatio, complexZProjection, complexPattern, complexCount, complexReason, complexWCount, complexXCount, complexYCount, complexXXCount, complexZCount, complexTerminalIndex, complexConfirmationIndex] = f_eval_complex_correction(w5Index, latestIndex, true)
                         correctionTerminalIndex = latestIndex
                         if triangleConfirmed
@@ -1681,11 +1732,18 @@ if changed
                             correctionPrimary := "Triangle"
                             internalPattern := trianglePattern
                             internalCount := triangleCount
-                            correctionReason := "TRIANGLE_CONFIRMED"
+                            correctionReason := triangleReason
+                            correctionTerminalIndex := triangleTerminalIndex
                             correctionACount := triangleACount
                             correctionBCount := triangleBCount
                             correctionCCount := triangleCCount
-                        if complexConfirmed
+                        else if not correctionConfirmed and triangleReason == "TRIANGLE_BD_BREAK_PENDING"
+                            correctionPrimary := "Triangle"
+                            internalPattern := trianglePattern
+                            internalCount := triangleCount
+                            correctionReason := triangleReason
+                            correctionTerminalIndex := triangleTerminalIndex
+                        if complexConfirmed and f_correction_rank(complexPrimary) > f_correction_rank(correctionPrimary)
                             correctionConfirmed := true
                             correctionAlternate := correctionPrimary
                             correctionPrimary := complexPrimary
@@ -1730,11 +1788,11 @@ if changed
                                 lockedCPrice := array.get(swingPrices, cIndex)
                                 lockedDBar := array.get(swingBars, dIndex)
                                 lockedDPrice := array.get(swingPrices, dIndex)
-                                lockedEBar := latestBar
-                                lockedEPrice := latestPrice
-                                lockedTriangleTargetNear := lockedBullish ? latestPrice + triangleThrustMin : latestPrice - triangleThrustMin
-                                lockedTriangleTargetFar := lockedBullish ? latestPrice + triangleThrustMax : latestPrice - triangleThrustMax
-                                lockedTriangleInvalidation := latestPrice
+                                lockedEBar := array.get(swingBars, triangleTerminalIndex)
+                                lockedEPrice := array.get(swingPrices, triangleTerminalIndex)
+                                lockedTriangleTargetNear := lockedBullish ? lockedEPrice + triangleThrustMin : lockedEPrice - triangleThrustMin
+                                lockedTriangleTargetFar := lockedBullish ? lockedEPrice + triangleThrustMax : lockedEPrice - triangleThrustMax
+                                lockedTriangleInvalidation := lockedEPrice
                             else if correctionPrimary == "W-X-Y-XX-Z"
                                 yIndex = bIndex + correctionCCount
                                 xxIndex = yIndex + complexXXCount

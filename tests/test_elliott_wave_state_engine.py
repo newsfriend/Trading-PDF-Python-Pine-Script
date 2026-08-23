@@ -9,6 +9,7 @@ from python.elliott_wave_notes import (
     compute_elliott_waves,
     _run_candidate_state,
     _evaluate_correction,
+    _correction_rank_key,
     _evaluate_double_correction,
     _evaluate_diagonal,
     _evaluate_simple_correction,
@@ -184,6 +185,7 @@ def _contracting_triangle_from(starting_swings):
     _append_prices(swings, [115, 125, 105])
     _append_prices(swings, [115, 110, 123])
     _append_prices(swings, [112, 118, 108])
+    _append_prices(swings, [150])  # first closed B-D break after terminal E
     return swings
 
 
@@ -196,6 +198,7 @@ def _triangle_from_endpoints(endpoints):
         else:
             fillers = [(current + target) / 2.0, min(current, target) - 1.0, target]
         _append_prices(swings, fillers)
+    _append_prices(swings, [max((100, *endpoints)) + 50.0])
     return swings
 
 
@@ -755,6 +758,9 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(triangle["internal_pattern"], "3-3-3-3-3")
         self.assertGreater(triangle["thrust_max"], triangle["thrust_min"])
         self.assertEqual(triangle["invalidation_price"], 108.0)
+        self.assertEqual(triangle["confirmation_index"], len(swings) - 1)
+        self.assertLessEqual(triangle["touch_counts"]["A-C"], 5)
+        self.assertLessEqual(triangle["touch_counts"]["B-D"], 5)
         self.assertGreater(triangle["thrust_target_far"], triangle["thrust_target_near"])
 
     def test_v4_completed_triangle_confirms_wave4_before_wave5(self):
@@ -791,6 +797,38 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
                 triangle = _evaluate_triangle_correction(swings, 0, len(swings) - 1)
                 self.assertTrue(triangle["confirmed"])
                 self.assertEqual(triangle["subtype"], expected)
+
+    def test_v4_triangle_waits_for_closed_bd_break_after_e(self):
+        swings = _triangle_from_endpoints([50, 85, 60, 78, 65])[:-1]
+        triangle = _evaluate_triangle_correction(swings, 0, len(swings) - 1)
+        self.assertFalse(triangle["confirmed"])
+        self.assertEqual(triangle["reason_code"], "TRIANGLE_BD_BREAK_PENDING")
+        self.assertEqual(triangle["terminal_index"], len(swings) - 1)
+
+    def test_v4_section24_ranking_is_deterministic(self):
+        simple = {
+            "confirmed": True,
+            "mandatory_gate_count": 4,
+            "subdivision_score": 3,
+            "fib_error": 0.0,
+            "time_error": 0.0,
+            "parent_score": 1,
+            "confirmation_index": 10,
+        }
+        triangle = {
+            **simple,
+            "mandatory_gate_count": 7,
+            "subdivision_score": 5,
+            "confirmation_index": 12,
+        }
+        triple = {
+            **triangle,
+            "mandatory_gate_count": 12,
+            "confirmation_index": 20,
+        }
+        ranked = sorted((simple, triangle, triple), key=_correction_rank_key)
+        self.assertIs(ranked[0], triple)
+        self.assertIs(ranked[1], triangle)
 
     def test_v4_triangle_is_never_considered_for_wave2(self):
         swings = _contracting_triangle_from(_confirmed_wave1())

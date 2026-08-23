@@ -1546,12 +1546,15 @@ def _evaluate_correction(
     )
     candidates = [candidate for candidate in (triple, double) if candidate is not None]
     if allow_triangle:
-        triangle = _evaluate_triangle_correction(swings, start_idx, end_idx)
+        triangle = _evaluate_triangle_correction(
+            swings, start_idx, end_idx, source=source
+        )
         candidates.append(triangle)
     candidates.append(simple)
 
     confirmed = [candidate for candidate in candidates if candidate["confirmed"]]
     if confirmed:
+        confirmed.sort(key=_correction_rank_key)
         primary = confirmed[0]
         alternates = [
             str(candidate["primary"])
@@ -1559,7 +1562,9 @@ def _evaluate_correction(
             if candidate["primary"] != primary["primary"]
         ]
         if alternates:
-            primary["alternate"] = " | ".join(dict.fromkeys(alternates))
+            primary["alternate"] = " | ".join(
+                list(dict.fromkeys(alternates))[:2]
+            )
         return _with_correction_defaults(primary, end_idx)
 
     progressed = [
@@ -1577,7 +1582,7 @@ def _evaluate_correction(
         if candidate is not forming and int(candidate.get("progress_score", 0)) > 0
     ]
     if alternates:
-        forming["alternate"] = " | ".join(dict.fromkeys(alternates))
+        forming["alternate"] = " | ".join(list(dict.fromkeys(alternates))[:2])
     return _with_correction_defaults(forming, end_idx)
 
 
@@ -1595,7 +1600,26 @@ def _with_correction_defaults(
     candidate.setdefault("thrust_target_near", np.nan)
     candidate.setdefault("thrust_target_far", np.nan)
     candidate.setdefault("invalidation_price", np.nan)
+    candidate.setdefault("mandatory_gate_count", 0)
+    candidate.setdefault("subdivision_score", 0)
+    candidate.setdefault("fib_error", float("inf"))
+    candidate.setdefault("time_error", float("inf"))
+    candidate.setdefault("parent_score", 0)
     return candidate
+
+
+def _correction_rank_key(candidate: dict[str, object]) -> tuple[float, ...]:
+    """Return the deterministic V4 Section 24 correction ranking key."""
+
+    return (
+        0.0 if bool(candidate.get("confirmed")) else 1.0,
+        -float(candidate.get("mandatory_gate_count", 0)),
+        -float(candidate.get("subdivision_score", 0)),
+        float(candidate.get("fib_error", float("inf"))),
+        float(candidate.get("time_error", float("inf"))),
+        -float(candidate.get("parent_score", 0)),
+        float(candidate.get("confirmation_index", float("inf"))),
+    )
 
 
 def _component_total_counts(cfg: ElliottWaveConfig) -> tuple[int, ...]:
@@ -1625,7 +1649,9 @@ def _evaluate_component(
 ) -> dict[str, object]:
     simple = _evaluate_simple_correction(swings, start_idx, end_idx, cfg)
     if allow_triangle:
-        triangle = _evaluate_triangle_correction(swings, start_idx, end_idx)
+        triangle = _evaluate_triangle_correction(
+            swings, start_idx, end_idx, require_break=False
+        )
         if triangle["confirmed"]:
             return triangle
     return simple
@@ -1799,6 +1825,24 @@ def _evaluate_double_correction(
                     "reason_code": "DOUBLE_CONFIRMED" if confirmed else "DOUBLE_CONFIRMATION_PENDING",
                     "developing_label": "Y?",
                     "progress_score": 4 if confirmed else 3,
+                    "mandatory_gate_count": 8,
+                    "subdivision_score": 3,
+                    "fib_error": _nearest_error(
+                        x_ratio, (0.142, 0.25, 1.0 / 3.0, 0.50, 0.618, 1.0, 1.11)
+                    )
+                    + _nearest_error(y_projection, (0.618, 1.0, 1.618, 2.618)),
+                    "time_error": _nearest_error(
+                        float(x_duration),
+                        (0.25 * w_duration, w_duration / 3.0, 0.50 * w_duration),
+                    )
+                    + _nearest_error(
+                        float(y_duration),
+                        (
+                            float(w_duration),
+                            float(w_duration + x_duration),
+                            0.50 * (w_duration + x_duration),
+                        ),
+                    ),
                     "note": (
                         f"W-X-Y {w['primary']} + {y['primary']}; X={x_ratio:.2%} ({x_class}), "
                         f"Y={y_projection:.2%}; X/Y time gates pass. "
@@ -1975,6 +2019,26 @@ def _evaluate_triple_correction(
                         "reason_code": "TRIPLE_CONFIRMED",
                         "developing_label": "Z",
                         "progress_score": 5,
+                        "mandatory_gate_count": 12,
+                        "subdivision_score": 5,
+                        "fib_error": _nearest_error(
+                            x_ratio,
+                            (0.142, 0.25, 1.0 / 3.0, 0.50, 0.618, 1.0, 1.11),
+                        )
+                        + _nearest_error(y_projection, (0.618, 1.0, 1.618, 2.618))
+                        + _nearest_error(xx_ratio, (0.50, 0.618))
+                        + _nearest_error(z_projection, (0.618, 1.0, 1.618)),
+                        "time_error": _nearest_error(
+                            float(xx_duration), (float(x_duration),)
+                        )
+                        + _nearest_error(
+                            float(z_duration),
+                            (
+                                float(y_duration),
+                                float(y_duration + xx_duration),
+                                0.50 * (y_duration + xx_duration),
+                            ),
+                        ),
                         "note": (
                             f"W-X-Y-XX-Z complete; X={x_ratio:.2%} ({x_class}), "
                             f"Y={y_projection:.2%}, XX={xx_ratio:.2%}, Z={z_projection:.2%}; "
@@ -2003,9 +2067,14 @@ def _evaluate_triple_correction(
 
 
 def _evaluate_triangle_correction(
-    swings: list[_Swing], start_idx: int, end_idx: int
+    swings: list[_Swing],
+    start_idx: int,
+    end_idx: int,
+    *,
+    source: pd.DataFrame | None = None,
+    require_break: bool = True,
 ) -> dict[str, object]:
-    """Evaluate six V4 triangle families using five corrective legs and geometry."""
+    """Evaluate six V4 triangle families and the closed B-D break gate."""
 
     correction_counts = (3, 7, 11)
     for a_count in correction_counts:
@@ -2014,7 +2083,8 @@ def _evaluate_triangle_correction(
                 for d_count in correction_counts:
                     for e_count in correction_counts:
                         counts = (a_count, b_count, c_count, d_count, e_count)
-                        if start_idx + sum(counts) != end_idx:
+                        terminal_idx = start_idx + sum(counts)
+                        if terminal_idx > end_idx:
                             continue
                         endpoints: list[int] = []
                         cursor = start_idx
@@ -2058,6 +2128,39 @@ def _evaluate_triangle_correction(
                         if not subtype:
                             continue
 
+                        ac_touches = _triangle_line_touch_count(
+                            swings, start_idx, terminal_idx, endpoints[0], endpoints[2]
+                        )
+                        bd_touches = _triangle_line_touch_count(
+                            swings, start_idx, terminal_idx, endpoints[1], endpoints[3]
+                        )
+                        touch_pass = ac_touches <= 5 and bd_touches <= 5
+                        apex_position = _line_intersection_position(pa, pc, pb, pd)
+                        longest_duration = max(
+                            points[index + 1].position - points[index].position
+                            for index in range(5)
+                        )
+                        apex_pass = bool(
+                            subtype != "HORIZONTAL_CONTRACTING"
+                            or (
+                                np.isfinite(apex_position)
+                                and pe.position <= apex_position
+                                <= pe.position + 0.618 * longest_duration
+                            )
+                        )
+                        if not touch_pass or not apex_pass:
+                            continue
+
+                        break_confirmed, confirmation_idx = _triangle_post_e_confirmation(
+                            swings,
+                            endpoints[1],
+                            endpoints[3],
+                            endpoints[4],
+                            end_idx,
+                            source,
+                        )
+                        confirmed = not require_break or break_confirmed
+
                         thrust_base = max(lengths) if family == "contracting" else e
                         thrust_min = 0.75 * thrust_base if family == "contracting" else 0.618 * thrust_base
                         thrust_max = 1.25 * thrust_base if family == "contracting" else thrust_base
@@ -2065,7 +2168,7 @@ def _evaluate_triangle_correction(
                         thrust_target_near = pe.price + thrust_sign * thrust_min
                         thrust_target_far = pe.price + thrust_sign * thrust_max
                         return {
-                            "confirmed": True,
+                            "confirmed": confirmed,
                             "primary": "Triangle",
                             "alternate": "",
                             "subtype": subtype,
@@ -2075,9 +2178,30 @@ def _evaluate_triangle_correction(
                             "labels": ("A", "B", "C", "D", "E"),
                             "leg_counts": dict(zip(("A", "B", "C", "D", "E"), counts)),
                             "endpoint_indices": tuple(endpoints),
+                            "terminal_index": terminal_idx,
+                            "confirmation_index": (
+                                confirmation_idx if confirmed else terminal_idx
+                            ),
                             "internal_pattern": "-".join(str(count) for count in counts),
                             "internal_count": sum(counts),
-                            "reason_code": "TRIANGLE_CONFIRMED",
+                            "reason_code": (
+                                "TRIANGLE_CONFIRMED"
+                                if confirmed
+                                else "TRIANGLE_BD_BREAK_PENDING"
+                            ),
+                            "progress_score": 5 if confirmed else 4,
+                            "mandatory_gate_count": 7,
+                            "subdivision_score": 5,
+                            "fib_error": sum(
+                                _nearest_error(
+                                    lengths[index] / lengths[index - 1],
+                                    (0.50, 0.618, 0.812, 1.0),
+                                )
+                                for index in range(1, 5)
+                            ),
+                            "time_error": 0.0,
+                            "apex_position": apex_position,
+                            "touch_counts": {"A-C": ac_touches, "B-D": bd_touches},
                             "thrust_min": thrust_min,
                             "thrust_max": thrust_max,
                             "thrust_target_near": thrust_target_near,
@@ -2085,8 +2209,13 @@ def _evaluate_triangle_correction(
                             "invalidation_price": pe.price,
                             "note": (
                                 f"{subtype} passes five corrective legs, size order, "
-                                f"three >=50% retracements and boundary geometry; "
-                                f"thrust={thrust_min:.4g}-{thrust_max:.4g}."
+                                f"three >=50% retracements, apex/touch geometry; "
+                                f"thrust={thrust_min:.4g}-{thrust_max:.4g}. "
+                                + (
+                                    "Closed B-D break=PASS."
+                                    if confirmed
+                                    else "Await a closed B-D trendline break after E."
+                                )
                             ),
                         }
 
@@ -2104,6 +2233,7 @@ def _evaluate_triangle_correction(
         "internal_pattern": "3/7/11 corrective legs",
         "internal_count": max(0, end_idx - start_idx),
         "reason_code": "TRIANGLE_GEOMETRY_PENDING",
+        "progress_score": 0,
         "thrust_min": np.nan,
         "thrust_max": np.nan,
         "thrust_target_near": np.nan,
@@ -2111,6 +2241,75 @@ def _evaluate_triangle_correction(
         "invalidation_price": np.nan,
         "note": "Five-leg size sequence or boundary geometry is incomplete.",
     }
+
+
+def _line_intersection_position(
+    a1: _Swing, a2: _Swing, b1: _Swing, b2: _Swing
+) -> float:
+    a_slope = (a2.price - a1.price) / max(1, a2.position - a1.position)
+    b_slope = (b2.price - b1.price) / max(1, b2.position - b1.position)
+    denominator = a_slope - b_slope
+    if abs(denominator) <= 1e-12:
+        return np.nan
+    return (
+        b1.price
+        - a1.price
+        + a_slope * a1.position
+        - b_slope * b1.position
+    ) / denominator
+
+
+def _triangle_line_touch_count(
+    swings: list[_Swing],
+    start_idx: int,
+    end_idx: int,
+    first_idx: int,
+    second_idx: int,
+) -> int:
+    first = swings[first_idx]
+    second = swings[second_idx]
+    slope = (second.price - first.price) / max(1, second.position - first.position)
+    touches = 0
+    for swing in swings[start_idx : end_idx + 1]:
+        line_value = first.price + slope * (swing.position - first.position)
+        tolerance = 0.25 * swing.atr if np.isfinite(swing.atr) else 0.0
+        if abs(swing.price - line_value) <= max(tolerance, 1e-9):
+            touches += 1
+    return touches
+
+
+def _triangle_post_e_confirmation(
+    swings: list[_Swing],
+    b_idx: int,
+    d_idx: int,
+    e_idx: int,
+    end_idx: int,
+    source: pd.DataFrame | None,
+) -> tuple[bool, int]:
+    if end_idx <= e_idx:
+        return False, e_idx
+    b, d, e = swings[b_idx], swings[d_idx], swings[e_idx]
+    slope = (d.price - b.price) / max(1, d.position - b.position)
+    upward_break = e.kind == -1
+    observations: list[tuple[int, float, int]] = []
+    if source is not None and "close" in source:
+        last_position = min(swings[end_idx].confirmed_position, len(source) - 1)
+        observations.extend(
+            (position, float(source["close"].iloc[position]), end_idx)
+            for position in range(e.position + 1, last_position + 1)
+        )
+    else:
+        observations.extend(
+            (swings[index].position, swings[index].price, index)
+            for index in range(e_idx + 1, end_idx + 1)
+        )
+    for position, price, index in observations:
+        line_value = b.price + slope * (position - b.position)
+        if (upward_break and price > line_value) or (
+            not upward_break and price < line_value
+        ):
+            return True, index
+    return False, e_idx
 
 
 def _evaluate_simple_correction(
@@ -2179,6 +2378,13 @@ def _evaluate_simple_correction(
                             **timing,
                             "pattern": "Zig-Zag",
                             "subtype": subtype,
+                            "fib_error": _nearest_error(
+                                float(candidate["b_ratio"]), (0.382, 0.50, 0.618)
+                            )
+                            + _nearest_error(
+                                float(candidate["c_vs_a"]),
+                                (1.0, 1.618, 2.618, 4.618),
+                            ),
                             "a_structure": (
                                 "LEADING_DIAGONAL"
                                 if a_diagonal and a_diagonal["confirmed"]
@@ -2253,6 +2459,13 @@ def _evaluate_simple_correction(
                             **timing,
                             "pattern": "Flat",
                             "subtype": subtype,
+                            "fib_error": _nearest_error(
+                                float(candidate["b_ratio"]),
+                                (0.618, 0.812, 1.0, 1.11),
+                            )
+                            + _nearest_error(
+                                float(candidate["c_vs_a"]), (1.0, 1.618, 2.618)
+                            ),
                             "a_structure": "CORRECTIVE",
                             "c_structure": (
                                 "ENDING_DIAGONAL" if c_count == 15 else "IMPULSE"
@@ -2270,6 +2483,15 @@ def _evaluate_simple_correction(
                     )
 
     if candidates:
+        candidates.sort(
+            key=lambda candidate: (
+                float(candidate["fib_error"]),
+                float(candidate["time_error"]),
+                int(candidate["a_count"])
+                + int(candidate["b_count"])
+                + int(candidate["c_count"]),
+            )
+        )
         primary = candidates[0]
         alternate = candidates[1]["pattern"] if len(candidates) > 1 else ""
         return {
@@ -2293,6 +2515,10 @@ def _evaluate_simple_correction(
             "internal_pattern": primary["internal_pattern"],
             "internal_count": end_idx - start_idx,
             "reason_code": "CORRECTION_CONFIRMED",
+            "mandatory_gate_count": 4,
+            "subdivision_score": 3,
+            "fib_error": primary["fib_error"],
+            "time_error": primary["time_error"],
             "time_values": {
                 "A": primary["a_duration"],
                 "B": primary["b_duration"],
@@ -2432,6 +2658,12 @@ def _matches_absolute_time_targets(
     observed: int | float, targets: tuple[float, ...], tolerance_bars: int
 ) -> bool:
     return any(abs(float(observed) - target) <= tolerance_bars for target in targets)
+
+
+def _nearest_error(value: float, targets: tuple[float, ...]) -> float:
+    if not np.isfinite(value):
+        return float("inf")
+    return min(abs(value - target) for target in targets)
 
 
 def _w2_minimum(cfg: ElliottWaveConfig) -> float:

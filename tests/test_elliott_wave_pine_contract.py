@@ -137,6 +137,23 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(field, self.source)
         self.assertIn("triangleInvalidLine = line.new", self.source)
+        for token in (
+            'f_eval_triangle(w3Index, latestIndex, true)',
+            '"TRIANGLE_BD_BREAK_PENDING"',
+            "apexPosition",
+            "acTouches <= 5 and bdTouches <= 5",
+            "observedClose > bdValue",
+            "triangleTerminalIndex",
+        ):
+            self.assertIn(token, self.source)
+
+    def test_v4_correction_ranking_prefers_completed_mandatory_gates(self):
+        self.assertIn("f_correction_rank", self.source)
+        self.assertIn('pattern == "W-X-Y-XX-Z" ? 12', self.source)
+        self.assertIn(
+            "f_correction_rank(complexPrimary) > f_correction_rank(correctionPrimary)",
+            self.source,
+        )
 
     def test_v4_double_wxy_uses_locked_fib_time_and_post_y_confirmation(self):
         self.assertIn("f_eval_complex_correction", self.source)
