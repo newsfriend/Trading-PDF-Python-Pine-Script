@@ -7,8 +7,10 @@ charts into:
 - Python 3.10+ signal engines for analysis and backtesting.
 
 The repository currently contains a working **GEO P Momentum** implementation
-and a separate **Elliott Wave Notes** overlay. Reference material for the full
-setup collection is stored in the repository for future development.
+and a separate **Elliott Wave Notes** engine. Its dashboard stays in a
+resizable pane while wave drawings remain over the price chart. Reference
+material for the full setup collection is stored in the repository for future
+development.
 
 > **Project status:** Active development. Pine and Python share the same rule
 > definitions, but candle-for-candle parity must still be validated using the
@@ -20,7 +22,7 @@ setup collection is stored in the repository for future development.
 | --- | --- | --- | --- |
 | GEO P Momentum signals | Indicator | Signal engine | Implemented |
 | GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
-| Elliott Wave engine | V4 full-cycle overlay | V4 full-cycle state engine | Milestone-2 code complete; milestone-3 chart acceptance pending |
+| Elliott Wave engine | V4 chart drawings + separate dashboard pane | V4 full-cycle state engine | Milestone-2 code complete; milestone-3 chart acceptance pending |
 | Remaining PDF setups | - | - | Reference material only |
 
 ## GEO P Momentum
@@ -46,8 +48,9 @@ are documented in [docs/geo_p_momentum_pdf_rules.md](docs/geo_p_momentum_pdf_rul
 
 ## Elliott Wave Notes
 
-The Elliott Wave implementation is a separate analytical overlay; it does not
+The Elliott Wave implementation is a separate analytical engine; it does not
 generate GEO P Momentum BUY or SELL signals. Its source-locked candidate engine
+keeps the dashboard outside the price pane while overlaying wave drawings and
 now provides:
 
 - Confirmed and ATR-filtered swing detection.

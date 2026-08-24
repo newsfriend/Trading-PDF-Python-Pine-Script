@@ -16,6 +16,25 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.source,
         )
 
+    def test_dashboard_uses_a_separate_pane_without_losing_chart_drawings(self):
+        self.assertIn(
+            'indicator("Elliott Wave Notes Overlay", overlay=false',
+            self.source,
+        )
+        self.assertIn(
+            'input.string("Compact", "Dashboard", options=["Compact", "Full", "Hidden"]',
+            self.source,
+        )
+        drawing_calls = [
+            line
+            for line in self.source.splitlines()
+            if "line.new(" in line or "label.new(" in line
+        ]
+        self.assertTrue(drawing_calls)
+        self.assertTrue(all("force_overlay=true" in line for line in drawing_calls))
+        self.assertIn('dashboardMode == "Full"', self.source)
+        self.assertIn('dashboardMode == "Compact"', self.source)
+
     def test_important_context_comes_from_degree_source(self):
         self.assertIn("request.security", self.source)
         self.assertIn("degreeSourceTimeframe", self.source)

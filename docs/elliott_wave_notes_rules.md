@@ -122,7 +122,10 @@ for the exact milestone-2 code status and milestone-3 acceptance boundary.
 
 ## Files
 
-- `pine/elliott_wave_notes.pine` - Pine Script v6 overlay.
+- `pine/elliott_wave_notes.pine` - Pine Script v6 engine with a separate,
+  resizable dashboard pane. Wave drawings remain on the price chart. The
+  dashboard defaults to a compact active-route view and can be switched to
+  Full or Hidden from the Display settings.
 - `python/elliott_wave_notes.py` - Python candidate-state engine.
 - `tests/test_elliott_wave_state_engine.py` - lifecycle and core-impulse tests.
 - `tests/test_elliott_wave_pine_contract.py` - Pine source-contract checks.
