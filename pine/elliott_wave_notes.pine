@@ -1,5 +1,5 @@
 //@version=6
-indicator("Elliott Wave Notes Overlay", overlay=false, max_lines_count=500, max_labels_count=500)
+indicator("Elliott Wave Notes Overlay", overlay=true, behind_chart=false, max_lines_count=500, max_labels_count=500)
 
 // Post-Y confirmation uses a runtime-calculated close[offset]. Pine cannot
 // always infer the required historical buffer for dynamic offsets, so size
@@ -82,7 +82,7 @@ showWave4Internal = input.bool(true, "Show Wave 4 internal A/B/C", group=groupDi
 countDisplayMode = input.string("Validated Anchor", "Count mode", options=["Validated Anchor", "All swings"], group=groupDisplay)
 showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
 showAnchorFib = input.bool(true, "Show Important H/L fib guide", group=groupDisplay)
-dashboardMode = input.string("Compact", "Dashboard", options=["Compact", "Full", "Hidden"], group=groupDisplay, tooltip="Tables stay in this separate pane so they never cover price candles. Compact shows the active route and its neighbors; Full shows all nine routes.")
+dashboardMode = input.string("Full", "Dashboard", options=["Compact", "Full", "Hidden"], group=groupDisplay, tooltip="Full preserves the original nine-route dashboard. Compact shows the active route and its neighbors; Hidden removes the tables.")
 showTimeTable = input.bool(true, "Show state/evidence table", group=groupDisplay)
 showDegreeDashboard = input.bool(true, "Show degree router", group=groupDisplay)
 impulseLineColor = input.color(color.rgb(255, 128, 0), "Impulse line", group=groupDisplay)
@@ -108,8 +108,8 @@ var targetLines = array.new_line()
 var anchorFibLines = array.new_line()
 var anchorFibLabels = array.new_label()
 var channelLines = array.new_line()
-var table timeTable = table.new(position.top_left, 2, 7, border_width=1)
-var table degreeTable = table.new(position.top_right, 5, 10, border_width=1)
+var table timeTable = table.new(position.top_right, 2, 7, border_width=1)
+var table degreeTable = table.new(position.bottom_right, 5, 10, border_width=1)
 
 // Confirmed values are copied out of the raw swing arrays so later raw pivot
 // replacements cannot move any locked main-degree label.

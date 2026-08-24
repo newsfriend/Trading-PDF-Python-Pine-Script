@@ -16,13 +16,21 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.source,
         )
 
-    def test_dashboard_uses_a_separate_pane_without_losing_chart_drawings(self):
+    def test_dashboard_preserves_original_positions_in_the_foreground(self):
         self.assertIn(
-            'indicator("Elliott Wave Notes Overlay", overlay=false',
+            'indicator("Elliott Wave Notes Overlay", overlay=true, behind_chart=false',
             self.source,
         )
         self.assertIn(
-            'input.string("Compact", "Dashboard", options=["Compact", "Full", "Hidden"]',
+            'input.string("Full", "Dashboard", options=["Compact", "Full", "Hidden"]',
+            self.source,
+        )
+        self.assertIn(
+            'table.new(position.top_right, 2, 7',
+            self.source,
+        )
+        self.assertIn(
+            'table.new(position.bottom_right, 5, 10',
             self.source,
         )
         drawing_calls = [
