@@ -91,6 +91,9 @@ keeps the dashboard above chart candles and now provides:
   engine results through `compute_elliott_waves_multi_degree`.
 - Auditable pattern, subtype, Fib, time, momentum, reason, and next-condition
   output.
+- Hidden TradingView replay series and Python confirmation-event fields for
+  candle-by-candle state, parent, label, cycle, recount, and locked endpoint
+  parity checks.
 
 The local Pine/Python implementation now includes the V4 lifecycle and locked
 historical-cycle behavior. The source-conflicted, instrument-specific Wave-5
@@ -102,6 +105,8 @@ performance evidence. The old modulo-style sequence is available only as
 
 See [docs/elliott_wave_notes_rules.md](docs/elliott_wave_notes_rules.md) for the
 implemented rules and assumptions.
+Use [docs/elliott_wave_replay_acceptance.md](docs/elliott_wave_replay_acceptance.md)
+for the required XAUUSD 4H compile, replay, screenshot, and CSV parity gate.
 
 ## Repository Layout
 
@@ -114,13 +119,16 @@ Trading-PDF-Python/
 |-- python/
 |   |-- __init__.py
 |   |-- geo_p_momentum.py
-|   `-- elliott_wave_notes.py
+|   |-- elliott_wave_notes.py
+|   `-- elliott_wave_parity.py
 |-- docs/
 |   |-- geo_p_momentum_pdf_rules.md
 |   |-- elliott_wave_notes_rules.md
+|   |-- elliott_wave_replay_acceptance.md
 |   |-- elliott_wave_implementation_checklist_v2.md
 |   `-- first_task_acceptance_checklist.md
 |-- tests/
+|   |-- test_elliott_wave_parity.py
 |   |-- test_elliott_wave_state_engine.py
 |   `-- test_elliott_wave_pine_contract.py
 |-- assest/

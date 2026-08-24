@@ -569,6 +569,48 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(calendar.loc[pd.Timestamp("2024-06-01"), "_ew_important_high"], 20.0)
         self.assertEqual(legacy.loc[pd.Timestamp("2024-06-01"), "_ew_important_high"], 100.0)
 
+    def test_source_timeframe_context_uses_only_last_confirmed_daily_bar(self):
+        source_index = pd.to_datetime(
+            [
+                "2025-01-02 00:00:00+00:00",
+                "2025-01-02 04:00:00+00:00",
+                "2025-01-03 00:00:00+00:00",
+            ]
+        )
+        source = pd.DataFrame(
+            {
+                "high": [110.0, 115.0, 210.0],
+                "low": [90.0, 95.0, 190.0],
+                "close": [100.0, 105.0, 200.0],
+            },
+            index=source_index,
+        )
+        daily = pd.DataFrame(
+            {
+                "high": [100.0, 200.0, 300.0],
+                "low": [80.0, 180.0, 280.0],
+                "close": [90.0, 190.0, 290.0],
+            },
+            index=pd.to_datetime(
+                [
+                    "2025-01-01 00:00:00+00:00",
+                    "2025-01-02 00:00:00+00:00",
+                    "2025-01-03 00:00:00+00:00",
+                ]
+            ),
+        )
+        config = replace(
+            self.config,
+            important_context_mode="Source timeframe bars",
+            important_lookback=2,
+        )
+
+        enriched = _with_indicators(source, config, important_context=daily)
+
+        self.assertEqual(enriched.iloc[0]["_ew_important_high"], 100.0)
+        self.assertEqual(enriched.iloc[1]["_ew_important_high"], 100.0)
+        self.assertEqual(enriched.iloc[2]["_ew_important_high"], 200.0)
+
     def test_t07_trending_w3_is_classified_not_warned(self):
         state = _run_candidate_state(_through_w3(), self.config)
 
@@ -664,6 +706,23 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(_display_wave_label("4", "W-X-Y-XX-Z"), "4\n(Z)")
         self.assertEqual(_display_wave_label("4", "Triangle"), "4\n(E)")
         self.assertEqual(_display_wave_label("A", "Zig-Zag"), "(A)")
+
+    def test_v4_confirmation_events_use_pivot_confirmation_time(self):
+        swings = _through_w2()
+        state = _run_candidate_state(swings, self.config)
+        event = next(
+            event
+            for event in state["events"]
+            if event["values"].get("ew_reason_code") == "W2_CONFIRMED"
+        )
+        terminal = swings[state["active"]["waves"]["2"]["swing_idx"]]
+
+        self.assertEqual(event["index"], terminal.index)
+        self.assertEqual(event["confirmed_index"], terminal.confirmed_index)
+        self.assertGreater(event["confirmed_index"], event["index"])
+        self.assertTrue(event["values"]["ew_base_locked"])
+        self.assertEqual(event["values"]["ew_locked_wave2_price"], terminal.price)
+        self.assertTrue(pd.isna(event["values"]["ew_locked_wave3_price"]))
 
     def test_v4_archived_cycle_endpoints_are_prefix_invariant(self):
         first_only = _run_candidate_state(_through_larger_abc(), self.config)
@@ -1041,6 +1100,13 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             "ew_display_label",
             "ew_display_labels",
             "ew_cycle_ids",
+            "ew_confirmation_event",
+            "ew_confirmation_state",
+            "ew_confirmation_label",
+            "ew_confirmation_parent_state",
+            "ew_confirmation_pattern",
+            "ew_confirmation_reason_code",
+            "ew_confirmation_cycle",
             "ew_engine_state",
             "ew_reason_code",
             "ew_base_locked",

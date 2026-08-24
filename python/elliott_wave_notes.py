@@ -133,13 +133,18 @@ class _Swing:
 
 
 def compute_elliott_waves(
-    candles: pd.DataFrame, config: ElliottWaveConfig | None = None
+    candles: pd.DataFrame,
+    config: ElliottWaveConfig | None = None,
+    *,
+    important_context: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Return OHLC data with Elliott Wave labels on confirmed swing pivots."""
 
     cfg = config or ElliottWaveConfig()
     _validate_config(cfg)
-    source = _with_indicators(_normalize_ohlc(candles), cfg)
+    source = _with_indicators(
+        _normalize_ohlc(candles), cfg, important_context=important_context
+    )
     pivots = _detect_pivots(source, cfg)
     swings = _build_swings(pivots, cfg)
 
@@ -362,8 +367,15 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
     }
     if cfg.degree_preset not in valid_degree_presets:
         raise ValueError(f"degree_preset must be one of {sorted(valid_degree_presets)}")
-    if cfg.important_context_mode not in {"Calendar days", "Legacy bars"}:
-        raise ValueError('important_context_mode must be "Calendar days" or "Legacy bars"')
+    if cfg.important_context_mode not in {
+        "Calendar days",
+        "Source timeframe bars",
+        "Legacy bars",
+    }:
+        raise ValueError(
+            'important_context_mode must be "Calendar days", '
+            '"Source timeframe bars", or "Legacy bars"'
+        )
     if cfg.important_lookback_days < 1:
         raise ValueError("important_lookback_days must be at least 1 day")
     valid_oscillator_modes = {
@@ -507,13 +519,46 @@ def _normalize_ohlc(candles: pd.DataFrame) -> pd.DataFrame:
     return normalized.sort_index()
 
 
-def _with_indicators(source: pd.DataFrame, cfg: ElliottWaveConfig) -> pd.DataFrame:
+def _with_indicators(
+    source: pd.DataFrame,
+    cfg: ElliottWaveConfig,
+    *,
+    important_context: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     enriched = source.copy()
     close = enriched["close"].astype(float)
     high = enriched["high"].astype(float)
     low = enriched["low"].astype(float)
 
-    if cfg.important_context_mode == "Calendar days":
+    if cfg.important_context_mode == "Source timeframe bars":
+        if important_context is None:
+            raise ValueError(
+                "important_context is required for Source timeframe bars mode"
+            )
+        context = _normalize_ohlc(important_context)
+        if not isinstance(enriched.index, pd.DatetimeIndex) or not isinstance(
+            context.index, pd.DatetimeIndex
+        ):
+            raise ValueError(
+                "DatetimeIndex values are required for Source timeframe bars context"
+            )
+        context_high = context["high"].astype(float).rolling(
+            cfg.important_lookback, min_periods=1
+        ).max()
+        context_low = context["low"].astype(float).rolling(
+            cfg.important_lookback, min_periods=1
+        ).min()
+        source_is_context = enriched.index.equals(context.index)
+        if not source_is_context:
+            context_high = context_high.shift(1)
+            context_low = context_low.shift(1)
+        enriched["_ew_important_high"] = context_high.reindex(
+            enriched.index, method="ffill"
+        )
+        enriched["_ew_important_low"] = context_low.reindex(
+            enriched.index, method="ffill"
+        )
+    elif cfg.important_context_mode == "Calendar days":
         if not isinstance(enriched.index, pd.DatetimeIndex):
             raise ValueError(
                 "A DatetimeIndex is required for Calendar days Important H/L context. "
@@ -702,6 +747,11 @@ def _compute_candidate_state(
         "ew_target_cluster",
         "ew_fbd_candidate",
         "ew_support_evidence",
+        "ew_confirmation_state",
+        "ew_confirmation_label",
+        "ew_confirmation_parent_state",
+        "ew_confirmation_pattern",
+        "ew_confirmation_reason_code",
     )
     for column in object_columns:
         result[column] = pd.Series(index=result.index, dtype="object")
@@ -731,6 +781,12 @@ def _compute_candidate_state(
     result["ew_target_far"] = np.nan
     result["ew_invalidation_price"] = np.nan
     result["ew_channel_target"] = np.nan
+    result["ew_confirmation_event"] = False
+    result["ew_confirmation_cycle"] = np.nan
+    result["ew_confirmation_recount_count"] = 0
+    result["ew_confirmation_base_locked"] = False
+    for label in ("point0", "wave1", "wave2", "wave3", "wave4", "wave5"):
+        result[f"ew_confirmation_{label}_price"] = np.nan
 
     lifecycle = _run_candidate_state(swings, cfg, source)
     for event in lifecycle["events"]:
@@ -739,6 +795,39 @@ def _compute_candidate_state(
             continue
         for column, value in event["values"].items():
             result.loc[event_index, column] = value
+        confirmation_index = event.get("confirmed_index", event_index)
+        if confirmation_index not in result.index:
+            continue
+        event_values = event["values"]
+        result.loc[confirmation_index, "ew_confirmation_event"] = True
+        result.loc[confirmation_index, "ew_confirmation_state"] = event_values.get(
+            "ew_engine_state", ""
+        )
+        result.loc[confirmation_index, "ew_confirmation_label"] = event_values.get(
+            "ew_candidate_label", ""
+        )
+        result.loc[
+            confirmation_index, "ew_confirmation_parent_state"
+        ] = event_values.get("ew_parent_state", "SEARCHING")
+        result.loc[confirmation_index, "ew_confirmation_pattern"] = event_values.get(
+            "ew_pattern", ""
+        )
+        result.loc[
+            confirmation_index, "ew_confirmation_reason_code"
+        ] = event_values.get("ew_reason_code", "")
+        result.loc[confirmation_index, "ew_confirmation_cycle"] = int(
+            event.get("cycle_id", 0)
+        )
+        result.loc[
+            confirmation_index, "ew_confirmation_recount_count"
+        ] = int(event_values.get("ew_recount_count", 0))
+        result.loc[
+            confirmation_index, "ew_confirmation_base_locked"
+        ] = bool(event_values.get("ew_base_locked", False))
+        for label in ("point0", "wave1", "wave2", "wave3", "wave4", "wave5"):
+            result.loc[
+                confirmation_index, f"ew_confirmation_{label}_price"
+            ] = event_values.get(f"ew_locked_{label}_price", np.nan)
 
     active = lifecycle["active"]
     archived_cycles = list(lifecycle["completed_cycles"])
@@ -944,6 +1033,8 @@ def _run_candidate_state(
                 events.append(
                     {
                         "index": break_index,
+                        "confirmed_index": break_index,
+                        "cycle_id": int(active["cycle_id"]),
                         "values": {
                             "ew_engine_state": "INVALID",
                             "ew_rule_state": "invalid",
@@ -953,6 +1044,7 @@ def _run_candidate_state(
                             "ew_next_condition": "Release the count and search for a new qualified base.",
                             "ew_recount_count": recount_count,
                             "ew_base_locked": False,
+                            **_empty_locked_wave_event_values(),
                         },
                     }
                 )
@@ -1000,6 +1092,8 @@ def _run_candidate_state(
                 events.append(
                     {
                         "index": swing.index,
+                        "confirmed_index": swing.confirmed_index,
+                        "cycle_id": int(active["cycle_id"]),
                         "values": {
                             "ew_engine_state": "CONFIRMED",
                             "ew_candidate_label": "1",
@@ -1017,6 +1111,7 @@ def _run_candidate_state(
                             "ew_w1_degree_progress": candidate["degree_progress"],
                             "ew_internal_count": candidate["internal_count"],
                             "ew_recount_count": recount_count,
+                            **_locked_wave_event_values(active, swings),
                         },
                     }
                 )
@@ -1024,11 +1119,15 @@ def _run_candidate_state(
                 events.append(
                     {
                         "index": swing.index,
+                        "confirmed_index": swing.confirmed_index,
+                        "cycle_id": next_cycle_id,
                         "values": {
                             "ew_engine_state": "SEARCHING",
                             "ew_reason_code": "SEARCHING_FOR_BASE",
                             "ew_next_condition": "Wait for a qualified base and a 5/9/13/17/21-move Wave 1 candidate.",
                             "ew_recount_count": recount_count,
+                            "ew_base_locked": False,
+                            **_empty_locked_wave_event_values(),
                         },
                     }
                 )
@@ -1054,6 +1153,8 @@ def _run_candidate_state(
                 events.append(
                     {
                         "index": swing.index,
+                        "confirmed_index": swing.confirmed_index,
+                        "cycle_id": int(active["cycle_id"]),
                         "values": {
                             "ew_engine_state": transition["status"],
                             "ew_candidate_label": transition["candidate_label"],
@@ -1092,6 +1193,7 @@ def _run_candidate_state(
                             "ew_base_position": base.position,
                             "ew_recount_count": recount_count,
                             "ew_alternate_bases": alternate_count,
+                            **_locked_wave_event_values(active, swings),
                         },
                     }
                 )
@@ -1114,6 +1216,8 @@ def _run_candidate_state(
             events.append(
                 {
                     "index": source.index[tail_break],
+                    "confirmed_index": source.index[tail_break],
+                    "cycle_id": int(active["cycle_id"]),
                     "values": {
                         "ew_engine_state": "INVALID",
                         "ew_rule_state": "invalid",
@@ -1123,6 +1227,7 @@ def _run_candidate_state(
                         "ew_next_condition": "Release the count and search for a new qualified base.",
                         "ew_recount_count": recount_count,
                         "ew_base_locked": False,
+                        **_empty_locked_wave_event_values(),
                     },
                 }
             )
@@ -1149,6 +1254,34 @@ def _snapshot_completed_cycle(active: dict[str, object]) -> dict[str, object]:
         for label, wave in dict(active["waves"]).items()
     }
     return snapshot
+
+
+def _empty_locked_wave_event_values() -> dict[str, float]:
+    return {
+        f"ew_locked_{label}_price": np.nan
+        for label in ("point0", "wave1", "wave2", "wave3", "wave4", "wave5")
+    }
+
+
+def _locked_wave_event_values(
+    active: dict[str, object], swings: list[_Swing]
+) -> dict[str, object]:
+    values: dict[str, object] = {"ew_base_locked": True}
+    output_names = {
+        "0": "point0",
+        "1": "wave1",
+        "2": "wave2",
+        "3": "wave3",
+        "4": "wave4",
+        "5": "wave5",
+    }
+    waves = dict(active["waves"])
+    for wave_label, output_name in output_names.items():
+        wave = waves.get(wave_label)
+        values[f"ew_locked_{output_name}_price"] = (
+            swings[int(wave["swing_idx"])].price if wave is not None else np.nan
+        )
+    return values
 
 
 def _correction_terminal_label(pattern: str) -> str:

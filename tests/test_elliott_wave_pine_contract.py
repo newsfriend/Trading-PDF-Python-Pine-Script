@@ -182,6 +182,29 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.assertIn(f'alertcondition(stateChanged', self.source)
             self.assertIn(f'"{alert_name}"', self.source)
 
+    def test_v4_exports_hidden_replay_parity_series(self):
+        for title in (
+            "EW PARITY confirmation event",
+            "EW PARITY candidate state code",
+            "EW PARITY parent state code",
+            "EW PARITY confirmed label code",
+            "EW PARITY completed cycle count",
+            "EW PARITY recount count",
+            "EW PARITY base locked",
+            "EW PARITY Point 0 price",
+            "EW PARITY Wave 1 price",
+            "EW PARITY Wave 2 price",
+            "EW PARITY Wave 3 price",
+            "EW PARITY Wave 4 price",
+            "EW PARITY Wave 5 price",
+            "EW PARITY current Fib value",
+            "EW PARITY current time value",
+        ):
+            self.assertIn(f'"{title}"', self.source)
+        self.assertIn("display=display.data_window", self.source)
+        self.assertIn("f_candidate_state_code", self.source)
+        self.assertIn("f_parent_state_code", self.source)
+
     def test_v4_time_windows_are_confirmation_gates(self):
         for helper in (
             "f_w2_time_pass",

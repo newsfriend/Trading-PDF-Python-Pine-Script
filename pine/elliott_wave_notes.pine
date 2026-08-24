@@ -210,6 +210,12 @@ f_correction_terminal_label(pattern) =>
 f_parent_correction_label(parentLabel, pattern) =>
     parentLabel + "\n(" + f_correction_terminal_label(pattern) + ")"
 
+f_candidate_state_code(state) =>
+    state == "SEARCHING" ? 0 : state == "FORMING" ? 1 : state == "CONFIRMED" ? 2 : state == "INVALID" ? 3 : state == "ALTERNATE" ? 4 : -1
+
+f_parent_state_code(state) =>
+    state == "SEARCHING" ? 0 : state == "W2_CORRECTION_CONTAINER" ? 1 : state == "W3_FORMING" ? 2 : state == "W4_CORRECTION_CONTAINER" ? 3 : state == "W5_FORMING" ? 4 : state == "LARGER_CORRECTION_CONTAINER" ? 5 : state == "CORRECTION_CONFIRMED" ? 6 : -1
+
 f_correction_count() =>
     correctionPattern == "W-X-Y-XX-Z" or correctionPattern == "A-B-C-D-E" ? 5 : 3
 
@@ -2236,5 +2242,22 @@ alertcondition(stateChanged and str.contains(hpSignalState, "HP BUY"), "EW HP BU
 alertcondition(stateChanged and str.contains(hpSignalState, "HP SELL"), "EW HP SELL", "EW HP_SELL | {{ticker}} | chart {{interval}}")
 alertcondition(stateChanged and str.length(fbdCandidateState) > 0, "EW FBD FBO CANDIDATE", "EW FBD_FBO_CANDIDATE | {{ticker}} | chart {{interval}}")
 
+parityTerminalCorrectionCode = lockedCorrectionPattern == "W-X-Y-XX-Z" ? 15 : lockedCorrectionPattern == "W-X-Y" ? 13 : not na(lockedEBar) ? 10 : 8
+parityConfirmedLabelCode = not baseLocked ? -1 : engineStage == "CORRECTION_CONFIRMED" ? parityTerminalCorrectionCode : not na(lockedW5Bar) ? 5 : not na(lockedW4Bar) ? 4 : not na(lockedW3Bar) ? 3 : not na(lockedW2Bar) ? 2 : 1
+plot(stateChanged ? 1 : 0, "EW PARITY confirmation event", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_candidate_state_code(candidateState), "EW PARITY candidate state code", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_parent_state_code(engineStage), "EW PARITY parent state code", color=color.new(color.gray, 100), display=display.data_window)
+plot(parityConfirmedLabelCode, "EW PARITY confirmed label code", color=color.new(color.gray, 100), display=display.data_window)
+plot(completedCycleCount, "EW PARITY completed cycle count", color=color.new(color.gray, 100), display=display.data_window)
+plot(recountCount, "EW PARITY recount count", color=color.new(color.gray, 100), display=display.data_window)
+plot(baseLocked ? 1 : 0, "EW PARITY base locked", color=color.new(color.gray, 100), display=display.data_window)
+plot(baseLocked ? lockedBasePrice : na, "EW PARITY Point 0 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(baseLocked ? lockedW1Price : na, "EW PARITY Wave 1 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(baseLocked and not na(lockedW2Bar) ? lockedW2Price : na, "EW PARITY Wave 2 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(baseLocked and not na(lockedW3Bar) ? lockedW3Price : na, "EW PARITY Wave 3 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(baseLocked and not na(lockedW4Bar) ? lockedW4Price : na, "EW PARITY Wave 4 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(baseLocked and not na(lockedW5Bar) ? lockedW5Price : na, "EW PARITY Wave 5 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(currentFibValue, "EW PARITY current Fib value", color=color.new(color.gray, 100), display=display.data_window)
+plot(currentTimeValue, "EW PARITY current time value", color=color.new(color.gray, 100), display=display.data_window)
 plot(currentChannelTarget, "EW channel target", color=color.new(color.blue, 100), display=display.data_window)
 plot(not na(currentConfidence) ? math.min(100.0, currentConfidence + routeConfidenceBonus) : na, "EW confidence", color=color.new(color.gray, 100), display=display.data_window)

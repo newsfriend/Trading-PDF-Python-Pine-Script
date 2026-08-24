@@ -88,7 +88,10 @@ Fibonacci opportunity.
 Pine reads 144 candles from the configured degree-source timeframe (Daily for
 the default day-trading preset). Python defaults to a true rolling 144-calendar-
 day window and requires a `DatetimeIndex`. `Legacy bars` remains available only
-for compatibility.
+for compatibility. For TradingView parity, Python's `Source timeframe bars`
+mode accepts a separate degree-source OHLC frame, uses the same 144 source-bar
+window, and exposes only the last confirmed higher-timeframe candle. The replay
+tool derives that Daily frame from the exported XAUUSD 4H candles.
 
 ## Output and Debug Fields
 
@@ -103,6 +106,11 @@ including `ew_label`, `ew_labels`, `ew_display_label`, `ew_display_labels`,
 chronological `ew_parent_alignment`, `ew_context_alignment`, and
 `ew_routed_confidence`; these fields use confirmation timestamps so future
 parent direction is never backfilled into earlier bars.
+
+The `ew_confirmation_*` fields are separate from pivot-placement fields. Main
+labels remain attached to their actual historical pivots, while confirmation
+events are emitted on the later candle where the pivot becomes knowable. Pine
+exports matching hidden `EW PARITY ...` series for TradingView CSV comparison.
 
 `ew_labels` and `ew_cycle_ids` preserve both identities when a terminal
 correction pivot is also the next cycle's Point 0. `ew_display_label` adds only

@@ -56,7 +56,7 @@ The older manuals and chart images remain supporting references.
 | Channel, time, momentum, HP and FBD support engines | DONE IN CODE | Mandatory time and momentum evidence, HP eligibility, 2-4/parallel-3 and Zig-Zag channels, lower-degree W4 zones, Fib/channel clusters, confidence, and non-resetting FBD/FBO nominations are exposed. |
 | Automatic larger correction after Wave 5 | DONE IN CODE | The engine exposes actual terminal C/Y/Z/E pivots for Zig-Zag, Flat, Double, Triple and Triangle paths, distinct from later confirmation bars. |
 | Double-confirmation outcome | DONE in code | After Y completes, both engines require the first closed 0-X break or >=38.2% WXY retracement within Y duration; otherwise the Double remains FORMING. TradingView replay evidence remains an acceptance item. |
-| Pine/Python candle-for-candle parity | MILESTONE 3 | State semantics/settings are aligned; exported TradingView market data must be replayed against Python. |
+| Pine/Python candle-for-candle parity | READY FOR LIVE EVIDENCE | Python exposes pivot-confirmation events separately from historical label placement. Pine exports hidden state/parent/label/cycle/recount and locked endpoint series, and `python/elliott_wave_parity.py` produces a mismatch report from TradingView CSV data using confirmed Daily source context. The XAUUSD 4H export must still be captured and pass. |
 | Backtesting acceptance | MILESTONE 3 | Requires client-approved symbols, periods, expected counts, and acceptance thresholds. |
 | TradingView compile, replay and performance evidence | MILESTONE 3 | Local source contracts pass; Pine v6 compilation and chart behavior must be verified in TradingView. |
 
