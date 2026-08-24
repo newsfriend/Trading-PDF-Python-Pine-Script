@@ -124,8 +124,10 @@ for the exact milestone-2 code status and milestone-3 acceptance boundary.
 
 - `pine/elliott_wave_notes.pine` - Pine Script v6 chart overlay. The state
   table remains at top-right and the nine-degree router at bottom-right, with
-  the script rendered in front of chart candles for readability. The router
-  can also be switched to Compact or Hidden from the Display settings.
+  the script rendered in front of chart candles for readability. All visible
+  dashboard cells use fully opaque dark backgrounds so chart objects cannot
+  show through. The router can also be switched to Compact or Hidden from the
+  Display settings.
 - `python/elliott_wave_notes.py` - Python candidate-state engine.
 - `tests/test_elliott_wave_state_engine.py` - lifecycle and core-impulse tests.
 - `tests/test_elliott_wave_pine_contract.py` - Pine source-contract checks.

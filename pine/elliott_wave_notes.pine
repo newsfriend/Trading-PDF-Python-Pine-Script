@@ -91,6 +91,12 @@ fibLineColor = input.color(color.rgb(0, 80, 255), "Important H/L fib", group=gro
 labelTextColor = input.color(color.white, "Label text", group=groupDisplay)
 labelSizeInput = input.string("small", "Label size", options=["tiny", "small", "normal"], group=groupDisplay)
 
+// Fully opaque dashboard colors prevent candles, labels, and status-line text
+// from showing through the fixed table cells.
+dashboardHeaderColor = color.rgb(38, 41, 49)
+dashboardBodyColor = color.rgb(55, 58, 67)
+dashboardSelectedColor = color.rgb(55, 91, 166)
+
 var swingBars = array.new_int()
 var swingPrices = array.new_float()
 var swingTypes = array.new_int()
@@ -1192,30 +1198,30 @@ f_update_time_table() =>
             patternEvidence = str.length(alternatePattern) > 0 ? primaryPattern + " | alt " + alternatePattern : primaryPattern
             routedConfidence = not na(currentConfidence) ? math.min(100.0, currentConfidence + routeConfidenceBonus) : na
             supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "") + (str.length(currentChannelState) > 0 ? " | " + currentChannelState : "") + (str.length(currentTargetCluster) > 0 ? " | " + currentTargetCluster : "") + (str.length(fbdCandidateState) > 0 ? " | " + fbdCandidateState : "") + (not na(routedConfidence) ? " | confidence " + str.tostring(routedConfidence, "#") : "")
-            table.cell(timeTable, 0, 0, engineMode == "Candidate State (V4 Full Cycle)" ? "EW V4" : "EW Phase 1", text_color=color.white, bgcolor=color.new(color.black, 0))
+            table.cell(timeTable, 0, 0, engineMode == "Candidate State (V4 Full Cycle)" ? "EW V4" : "EW Phase 1", text_color=color.white, bgcolor=dashboardHeaderColor)
             table.cell(timeTable, 1, 0, candidateState, text_color=color.white, bgcolor=stateColor)
-            table.cell(timeTable, 0, 1, "Degree", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 1, degreeName + " / " + degreeSourceTimeframe, text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 2, "Parent state", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 2, engineStage + (baseLocked ? " | P0 " + str.tostring(lockedBasePrice, format.mintick) : ""), text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 3, "Pattern", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 3, str.length(patternEvidence) > 0 ? patternEvidence : "waiting", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 4, "Evidence", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 4, fibEvidence + (str.length(currentInternalPattern) > 0 ? " | " + currentInternalPattern : "") + supportEvidence, text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 5, "Reason / recount", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 5, lastReasonCode + " | " + str.tostring(recountCount) + "/" + str.tostring(alternateBaseCount), text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 6, "Next", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 6, currentNextCondition, text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 1, "Degree", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 1, degreeName + " / " + degreeSourceTimeframe, text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 0, 2, "Parent state", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 2, engineStage + (baseLocked ? " | P0 " + str.tostring(lockedBasePrice, format.mintick) : ""), text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 0, 3, "Pattern", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 3, str.length(patternEvidence) > 0 ? patternEvidence : "waiting", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 0, 4, "Evidence", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 4, fibEvidence + (str.length(currentInternalPattern) > 0 ? " | " + currentInternalPattern : "") + supportEvidence, text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 0, 5, "Reason / recount", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 5, lastReasonCode + " | " + str.tostring(recountCount) + "/" + str.tostring(alternateBaseCount), text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 0, 6, "Next", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 6, currentNextCondition, text_color=color.white, bgcolor=dashboardBodyColor)
         else
             [state, note] = f_latest_time_note()
-            table.cell(timeTable, 0, 0, "EW Time", text_color=color.white, bgcolor=color.new(color.black, 0))
+            table.cell(timeTable, 0, 0, "EW Time", text_color=color.white, bgcolor=dashboardHeaderColor)
             table.cell(timeTable, 1, 0, state, text_color=color.white, bgcolor=state == "WARN" ? color.new(color.orange, 0) : color.new(color.green, 0))
-            table.cell(timeTable, 0, 1, "Rule", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 1, "Wave 2 <= " + str.tostring(wave2MaxTime, "#.##") + "x Wave 1", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 2, "Latest", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 2, note, text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 0, 3, "Correction", text_color=color.white, bgcolor=color.new(color.black, 15))
-            table.cell(timeTable, 1, 3, correctionPattern, text_color=color.white, bgcolor=color.new(color.black, 15))
+            table.cell(timeTable, 0, 1, "Rule", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 1, "Wave 2 <= " + str.tostring(wave2MaxTime, "#.##") + "x Wave 1", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 0, 2, "Latest", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 2, note, text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 0, 3, "Correction", text_color=color.white, bgcolor=dashboardBodyColor)
+            table.cell(timeTable, 1, 3, correctionPattern, text_color=color.white, bgcolor=dashboardBodyColor)
             for row = 4 to 6
                 table.cell(timeTable, 0, row, "", bgcolor=color.new(color.black, 100))
                 table.cell(timeTable, 1, row, "", bgcolor=color.new(color.black, 100))
@@ -2053,7 +2059,7 @@ if degreeDashboardVisible and barstate.islast
     routeAlignments = array.from("ROOT", f_route_alignment_text(routeWDir, routeMDir, true), f_route_alignment_text(routeDDir, routeWDir, true), f_route_alignment_text(route288Dir, routeDDir, true), f_route_alignment_text(route240Dir, routeDDir, true), f_route_alignment_text(route60Dir, route240Dir, true) + " / " + f_route_alignment_text(route60Dir, route288Dir, true), f_route_alignment_text(route15Dir, route60Dir, true), f_route_alignment_text(route5Dir, route15Dir, true), f_route_alignment_text(route3Dir, route5Dir, true))
     for column = 0 to 4
         header = column == 0 ? "Degree" : column == 1 ? "TF" : column == 2 ? "Parent" : column == 3 ? "State / moves" : "Alignment"
-        table.cell(degreeTable, column, 0, header, text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(degreeTable, column, 0, header, text_color=color.white, bgcolor=dashboardHeaderColor)
     activeRouteIndex = timeframe.period == "M" ? 0 : timeframe.period == "W" ? 1 : timeframe.period == "D" ? 2 : timeframe.period == "288" ? 3 : timeframe.period == "240" ? 4 : timeframe.period == "60" ? 5 : timeframe.period == "15" ? 6 : timeframe.period == "5" ? 7 : timeframe.period == "3" ? 8 : 5
     firstRouteIndex = dashboardMode == "Full" ? 0 : math.max(0, activeRouteIndex - 1)
     lastRouteIndex = dashboardMode == "Full" ? 8 : math.min(8, firstRouteIndex + 2)
@@ -2061,7 +2067,7 @@ if degreeDashboardVisible and barstate.islast
     outputRow = 1
     for routeIndex = firstRouteIndex to lastRouteIndex
         selectedRoute = routeIndex == activeRouteIndex
-        routeColor = selectedRoute ? color.new(color.blue, 55) : color.new(color.black, 15)
+        routeColor = selectedRoute ? dashboardSelectedColor : dashboardBodyColor
         table.cell(degreeTable, 0, outputRow, array.get(routeNames, routeIndex), text_color=color.white, bgcolor=routeColor)
         table.cell(degreeTable, 1, outputRow, array.get(routeFrames, routeIndex), text_color=color.white, bgcolor=routeColor)
         table.cell(degreeTable, 2, outputRow, array.get(routeParents, routeIndex), text_color=color.white, bgcolor=routeColor)

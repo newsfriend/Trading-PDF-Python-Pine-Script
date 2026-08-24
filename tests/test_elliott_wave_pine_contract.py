@@ -33,6 +33,16 @@ class ElliottWavePineContractTests(unittest.TestCase):
             'table.new(position.bottom_right, 5, 10',
             self.source,
         )
+        for color_name in (
+            "dashboardHeaderColor",
+            "dashboardBodyColor",
+            "dashboardSelectedColor",
+        ):
+            self.assertIn(f"{color_name} = color.rgb(", self.source)
+        self.assertIn(
+            "routeColor = selectedRoute ? dashboardSelectedColor : dashboardBodyColor",
+            self.source,
+        )
         drawing_calls = [
             line
             for line in self.source.splitlines()
