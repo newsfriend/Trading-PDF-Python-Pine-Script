@@ -410,7 +410,7 @@ f_index_for_bar(targetBar) =>
 f_ratio(numerator, denominator) =>
     denominator == 0 or na(denominator) ? na : numerator / denominator
 
-f_degree_route_snapshot(routePivotLength) =>
+f_degree_route_snapshot(routePivotLength, sourceOffset) =>
     routeHigh = ta.pivothigh(high, routePivotLength, routePivotLength)
     routeLow = ta.pivotlow(low, routePivotLength, routePivotLength)
     routeType = not na(routeHigh) ? 1 : not na(routeLow) ? -1 : 0
@@ -420,6 +420,7 @@ f_degree_route_snapshot(routePivotLength) =>
     var float routeOrigin = na
     var int routeMoves = 0
     var int routeDirection = 0
+    routeRange = ta.highest(high, 144) - ta.lowest(low, 144)
     if routeType != 0
         if lastRouteType == 0
             lastRouteType := routeType
@@ -433,7 +434,6 @@ f_degree_route_snapshot(routePivotLength) =>
             routeMoves += 1
             lastRouteType := routeType
             lastRoutePrice := routePrice
-            routeRange = ta.highest(high, 144) - ta.lowest(low, 144)
             routeProgress = routeRange > 0 ? math.abs(routePrice - routeOrigin) / routeRange : na
             motiveCount = routeMoves == 5 or routeMoves == 9 or routeMoves == 13 or routeMoves == 17 or routeMoves == 21
             if motiveCount and not na(routeProgress) and routeProgress >= 0.618
@@ -442,7 +442,7 @@ f_degree_route_snapshot(routePivotLength) =>
                 routeOrigin := routePrice
                 routeMoves := 0
                 routeDirection := 0
-    [routeDirection, routeMoves]
+    [routeDirection[sourceOffset], routeMoves[sourceOffset]]
 
 f_route_state_text(routeDirection) =>
     routeDirection == 1 ? "BULLISH" : routeDirection == -1 ? "BEARISH" : "SEARCHING"
@@ -1434,20 +1434,33 @@ macdHist = macdLine - macdSignalLine
 pivotAtr = atrValue[pivotRight]
 pivotRsi = rsiValue[pivotRight]
 pivotMacdHist = macdHist[pivotRight]
-[routeMDir, routeMMoves] = request.security(syminfo.tickerid, "M", f_degree_route_snapshot(2), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[routeWDir, routeWMoves] = request.security(syminfo.tickerid, "W", f_degree_route_snapshot(3), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[routeDDir, routeDMoves] = request.security(syminfo.tickerid, "D", f_degree_route_snapshot(5), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[route288Dir, route288Moves] = request.security(syminfo.tickerid, "288", f_degree_route_snapshot(5), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[route240Dir, route240Moves] = request.security(syminfo.tickerid, "240", f_degree_route_snapshot(5), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[route60Dir, route60Moves] = request.security(syminfo.tickerid, "60", f_degree_route_snapshot(7), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[route15Dir, route15Moves] = request.security(syminfo.tickerid, "15", f_degree_route_snapshot(9), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[route5Dir, route5Moves] = request.security(syminfo.tickerid, "5", f_degree_route_snapshot(12), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[route3Dir, route3Moves] = request.security(syminfo.tickerid, "3", f_degree_route_snapshot(15), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+routeMSourceOffset = timeframe.in_seconds("M") > timeframe.in_seconds() ? 1 : 0
+routeWSourceOffset = timeframe.in_seconds("W") > timeframe.in_seconds() ? 1 : 0
+routeDSourceOffset = timeframe.in_seconds("D") > timeframe.in_seconds() ? 1 : 0
+route288SourceOffset = timeframe.in_seconds("288") > timeframe.in_seconds() ? 1 : 0
+route240SourceOffset = timeframe.in_seconds("240") > timeframe.in_seconds() ? 1 : 0
+route60SourceOffset = timeframe.in_seconds("60") > timeframe.in_seconds() ? 1 : 0
+route15SourceOffset = timeframe.in_seconds("15") > timeframe.in_seconds() ? 1 : 0
+route5SourceOffset = timeframe.in_seconds("5") > timeframe.in_seconds() ? 1 : 0
+route3SourceOffset = timeframe.in_seconds("3") > timeframe.in_seconds() ? 1 : 0
+[routeMDir, routeMMoves] = request.security(syminfo.tickerid, "M", f_degree_route_snapshot(2, routeMSourceOffset), gaps=barmerge.gaps_off, lookahead=routeMSourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[routeWDir, routeWMoves] = request.security(syminfo.tickerid, "W", f_degree_route_snapshot(3, routeWSourceOffset), gaps=barmerge.gaps_off, lookahead=routeWSourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[routeDDir, routeDMoves] = request.security(syminfo.tickerid, "D", f_degree_route_snapshot(5, routeDSourceOffset), gaps=barmerge.gaps_off, lookahead=routeDSourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[route288Dir, route288Moves] = request.security(syminfo.tickerid, "288", f_degree_route_snapshot(5, route288SourceOffset), gaps=barmerge.gaps_off, lookahead=route288SourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[route240Dir, route240Moves] = request.security(syminfo.tickerid, "240", f_degree_route_snapshot(5, route240SourceOffset), gaps=barmerge.gaps_off, lookahead=route240SourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[route60Dir, route60Moves] = request.security(syminfo.tickerid, "60", f_degree_route_snapshot(7, route60SourceOffset), gaps=barmerge.gaps_off, lookahead=route60SourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[route15Dir, route15Moves] = request.security(syminfo.tickerid, "15", f_degree_route_snapshot(9, route15SourceOffset), gaps=barmerge.gaps_off, lookahead=route15SourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[route5Dir, route5Moves] = request.security(syminfo.tickerid, "5", f_degree_route_snapshot(12, route5SourceOffset), gaps=barmerge.gaps_off, lookahead=route5SourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
+[route3Dir, route3Moves] = request.security(syminfo.tickerid, "3", f_degree_route_snapshot(15, route3SourceOffset), gaps=barmerge.gaps_off, lookahead=route3SourceOffset == 1 ? barmerge.lookahead_on : barmerge.lookahead_off)
 routeParentAligned = timeframe.period == "W" ? routeWDir != 0 and routeWDir == routeMDir : timeframe.period == "D" ? routeDDir != 0 and routeDDir == routeWDir : timeframe.period == "288" ? route288Dir != 0 and route288Dir == routeDDir : timeframe.period == "240" ? route240Dir != 0 and route240Dir == routeDDir : timeframe.period == "60" ? route60Dir != 0 and route60Dir == route240Dir : timeframe.period == "15" ? route15Dir != 0 and route15Dir == route60Dir : timeframe.period == "5" ? route5Dir != 0 and route5Dir == route15Dir : timeframe.period == "3" ? route3Dir != 0 and route3Dir == route5Dir : false
 routeConfidenceBonus := routeParentAligned ? 5.0 : 0.0
 
-degreeImportantHigh = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.highest(high, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-degreeImportantLow = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.lowest(low, importantLookbackDays), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+degreeSourceOffset = timeframe.in_seconds(degreeSourceTimeframe) > timeframe.in_seconds() ? 1 : 0
+invalidManualDegree = degreePreset == "Manual" and timeframe.in_seconds(degreeSourceTimeframe) < timeframe.in_seconds()
+if barstate.isfirst and invalidManualDegree
+    runtime.error("Manual Important H/L timeframe must be equal to or higher than the chart timeframe.")
+degreeImportantHigh = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.highest(high, importantLookbackDays)[degreeSourceOffset], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+degreeImportantLow = request.security(syminfo.tickerid, degreeSourceTimeframe, ta.lowest(low, importantLookbackDays)[degreeSourceOffset], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
 importantHighSeries = f_is_candidate_mode() ? degreeImportantHigh : ta.highest(high, importantLookback)
 importantLowSeries = f_is_candidate_mode() ? degreeImportantLow : ta.lowest(low, importantLookback)
 importantHighAtPivot = importantHighSeries[pivotRight]

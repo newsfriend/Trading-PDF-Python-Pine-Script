@@ -96,6 +96,35 @@ class GeoPMomentumRuntimeTests(unittest.TestCase):
         signals = compute_signals(candles, config)
         self.assertEqual(len(signals), len(candles))
 
+    def test_manual_context_cannot_be_lower_than_the_chart(self):
+        with self.assertRaisesRegex(ValueError, "Manual Tide timeframe"):
+            compute_signals(
+                _sample_candles(),
+                GeoPMomentumConfig(
+                    timeframe_mode="Manual",
+                    chart_timeframe="60",
+                    tide_timeframe="15",
+                ),
+            )
+
+    def test_confirmed_signals_are_prefix_invariant(self):
+        candles = _sample_candles()
+        full = compute_signals(candles)
+        prefix = compute_signals(candles.iloc[:420])
+        for column in (
+            "raw_buy_signal",
+            "raw_sell_signal",
+            "buy_signal",
+            "sell_signal",
+            "line2_buy_setup",
+            "line2_sell_setup",
+        ):
+            pd.testing.assert_series_equal(
+                prefix[column],
+                full.loc[prefix.index, column],
+                check_names=False,
+            )
+
     def test_invalid_market_data_and_config_are_rejected_early(self):
         candles = _sample_candles()
         duplicated = pd.concat([candles.iloc[:1], candles])
@@ -143,11 +172,18 @@ class GeoPMomentumPineContractTests(unittest.TestCase):
                 for token in required_tokens:
                     self.assertIn(token, source)
 
-    def test_pine_mtf_requests_never_enable_lookahead(self):
+    def test_pine_mtf_requests_use_confirmed_higher_timeframe_values(self):
         for name, source in self.sources.items():
             with self.subTest(script=name):
-                self.assertGreaterEqual(source.count("barmerge.lookahead_off"), 2)
-                self.assertNotIn("barmerge.lookahead_on", source)
+                self.assertIn("f_tide_values(sourceOffset)", source)
+                self.assertIn("f_wave_rsi(sourceOffset)", source)
+                self.assertIn("tideBuy[sourceOffset]", source)
+                self.assertIn("ta.rsi(close, rsiLength)[sourceOffset]", source)
+                self.assertIn("tideSourceOffset = timeframe.in_seconds(tideTf)", source)
+                self.assertIn("waveSourceOffset = timeframe.in_seconds(waveTf)", source)
+                self.assertIn("invalidManualContext", source)
+                self.assertIn("runtime.error", source)
+                self.assertGreaterEqual(source.count("barmerge.lookahead_on"), 2)
 
 
 if __name__ == "__main__":

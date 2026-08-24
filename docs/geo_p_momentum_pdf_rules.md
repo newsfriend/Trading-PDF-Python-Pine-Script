@@ -94,6 +94,14 @@ is:
 | Weekly | Monthly | Monthly |
 | Monthly | Same monthly chart | Same monthly chart |
 
+Pine requests a higher Tide/Wave timeframe from its last confirmed source
+candle. This prevents a closed execution-chart signal from depending on an
+unfinished higher-timeframe candle and later disappearing from history. Python
+resampling likewise exposes a higher-timeframe candle only at its closing
+timestamp. Manual Tide/Wave selections must be equal to or higher than the
+execution chart; lower-timeframe requests are rejected because they cannot
+produce reliable Pine/Python parity through `request.security()`.
+
 ## Step 3 - Stop Loss
 
 - BUY trade: below BBC candle or below TLBO point.

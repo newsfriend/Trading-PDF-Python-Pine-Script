@@ -99,7 +99,11 @@ parent direction is never backfilled into earlier bars.
 Pine draws locked labels 0-5 and A-B-C, W-X-Y, W-X-Y-XX-Z, or A-B-C-D-E for supported paths and shows the same parent
 state, pattern, evidence, reason, recount, and next-condition diagnostics in its
 panel. Raw pivots that have not passed a parent gate are shown only as small
-developing labels.
+developing labels. Higher-timeframe degree and Important H/L requests use the
+last confirmed source candle, so unfinished parent candles cannot repaint a
+closed chart-timeframe result. A manual Important H/L timeframe below the chart
+is rejected; lower locked routes remain dashboard snapshots and never drive the
+main count.
 
 ## Milestone Boundary
 

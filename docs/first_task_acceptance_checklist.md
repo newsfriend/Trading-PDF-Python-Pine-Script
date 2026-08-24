@@ -23,7 +23,8 @@ the client.
 - Use the same symbol and chart timeframe.
 - Keep `Timeframe mapping = PDF Auto` when validating the supplied 15m examples.
 - For a 15m execution chart, confirm the script resolves Tide to `240` / 4H and Wave to `60` / 1H.
-- In Manual mode, use the same Tide timeframe and Wave timeframe in both environments.
+- In Manual mode, use the same Tide timeframe and Wave timeframe in both
+  environments, and keep both equal to or higher than the execution chart.
 - Keep `Signal strength` identical in Pine and Python.
 - Keep `Required Better rows` identical in Pine and Python.
 - Keep all indicator lengths and thresholds identical.

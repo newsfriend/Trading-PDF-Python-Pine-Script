@@ -551,6 +551,9 @@ def _resolve_timeframes(candles: pd.DataFrame, cfg: GeoPMomentumConfig) -> tuple
     tide_rule = cfg.tide_timeframe
     wave_rule = cfg.wave_timeframe
     if cfg.timeframe_mode == "Manual":
+        chart_timeframe = cfg.chart_timeframe or _infer_timeframe(candles.index)
+        if chart_timeframe:
+            _validate_context_timeframes(chart_timeframe, tide_rule, wave_rule, cfg)
         return tide_rule, wave_rule
     if cfg.timeframe_mode != "PDF Auto":
         raise ValueError('timeframe_mode must be "PDF Auto" or "Manual".')
@@ -561,6 +564,29 @@ def _resolve_timeframes(candles: pd.DataFrame, cfg: GeoPMomentumConfig) -> tuple
 
     auto_tide, auto_wave = _pdf_timeframes(chart_timeframe)
     return tide_rule or auto_tide, wave_rule or auto_wave
+
+
+def _validate_context_timeframes(
+    chart_timeframe: str,
+    tide_timeframe: str | None,
+    wave_timeframe: str | None,
+    cfg: GeoPMomentumConfig,
+) -> None:
+    chart_minutes = _timeframe_to_minutes(chart_timeframe)
+    if chart_minutes is None:
+        return
+    contexts = [("Tide", tide_timeframe)]
+    if cfg.use_line2_mtf_refinement:
+        contexts.append(("Wave", wave_timeframe))
+    for name, timeframe_value in contexts:
+        if not timeframe_value:
+            continue
+        context_minutes = _timeframe_to_minutes(timeframe_value)
+        if context_minutes is not None and context_minutes < chart_minutes:
+            raise ValueError(
+                f"Manual {name} timeframe must be equal to or higher than "
+                "the chart timeframe."
+            )
 
 
 def _infer_timeframe(index: pd.Index) -> str | None:

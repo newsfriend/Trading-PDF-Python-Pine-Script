@@ -20,6 +20,20 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertIn("request.security", self.source)
         self.assertIn("degreeSourceTimeframe", self.source)
         self.assertIn("importantLookbackDays", self.source)
+        self.assertIn(
+            "degreeSourceOffset = timeframe.in_seconds(degreeSourceTimeframe)",
+            self.source,
+        )
+        self.assertIn(
+            "ta.highest(high, importantLookbackDays)[degreeSourceOffset]",
+            self.source,
+        )
+        self.assertIn(
+            "ta.lowest(low, importantLookbackDays)[degreeSourceOffset]",
+            self.source,
+        )
+        self.assertIn("invalidManualDegree", self.source)
+        self.assertIn("runtime.error", self.source)
 
     def test_locked_origin_has_hard_invalidation_and_recount(self):
         self.assertIn('lastReasonCode := "W2_ORIGIN_BREAK"', self.source)
@@ -177,27 +191,32 @@ class ElliottWavePineContractTests(unittest.TestCase):
 
     def test_v4_locked_nine_degree_router_and_parent_alignment_are_present(self):
         locked_routes = (
-            ('"M"', "2"),
-            ('"W"', "3"),
-            ('"D"', "5"),
-            ('"288"', "5"),
-            ('"240"', "5"),
-            ('"60"', "7"),
-            ('"15"', "9"),
-            ('"5"', "12"),
-            ('"3"', "15"),
+            ('"M"', "2", "routeMSourceOffset"),
+            ('"W"', "3", "routeWSourceOffset"),
+            ('"D"', "5", "routeDSourceOffset"),
+            ('"288"', "5", "route288SourceOffset"),
+            ('"240"', "5", "route240SourceOffset"),
+            ('"60"', "7", "route60SourceOffset"),
+            ('"15"', "9", "route15SourceOffset"),
+            ('"5"', "12", "route5SourceOffset"),
+            ('"3"', "15", "route3SourceOffset"),
         )
-        for timeframe, pivot in locked_routes:
+        for timeframe, pivot, source_offset in locked_routes:
             self.assertIn(
-                f"request.security(syminfo.tickerid, {timeframe}, f_degree_route_snapshot({pivot})",
+                f"request.security(syminfo.tickerid, {timeframe}, f_degree_route_snapshot({pivot}, {source_offset})",
                 self.source,
             )
+        self.assertGreaterEqual(self.source.count("barmerge.lookahead_on"), 11)
         self.assertIn("f_route_alignment_text(route60Dir, route240Dir, true)", self.source)
         self.assertIn("f_route_alignment_text(route60Dir, route288Dir, true)", self.source)
         self.assertIn("routeConfidenceBonus := routeParentAligned ? 5.0 : 0.0", self.source)
         self.assertIn("currentConfidence + routeConfidenceBonus", self.source)
         self.assertIn("routeMoves > 21", self.source)
         self.assertNotIn("routeMoves %", self.source)
+        route_function = self.source.index("f_degree_route_snapshot")
+        route_range = self.source.index("routeRange = ta.highest", route_function)
+        route_condition = self.source.index("if routeType != 0", route_function)
+        self.assertLess(route_range, route_condition)
 
     def test_v4_double_wxy_uses_locked_fib_time_and_post_y_confirmation(self):
         self.assertIn("f_eval_complex_correction", self.source)

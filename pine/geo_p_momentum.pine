@@ -76,7 +76,7 @@ f_auto_tide_tf() =>
     else
         timeframe.period
 
-f_tide_values() =>
+f_tide_values(sourceOffset) =>
     basis = ta.sma(close, bbLength)
     deviation = bbMult * ta.stdev(close, bbLength)
     upperBand = basis + deviation
@@ -89,16 +89,21 @@ f_tide_values() =>
     tideTiDown = ti < ti[1]
     tideBuy = (tideBbuc or close >= basis) and tideTiUp and rsiValue > rsiLongBase
     tideSell = (tideBbdc or close <= basis) and tideTiDown and rsiValue < rsiShortBase
-    [tideBuy, tideSell, ti, tideBbuc, tideBbdc, tideTiUp, tideTiDown, rsiValue]
+    [tideBuy[sourceOffset], tideSell[sourceOffset], ti[sourceOffset], tideBbuc[sourceOffset], tideBbdc[sourceOffset], tideTiUp[sourceOffset], tideTiDown[sourceOffset], rsiValue[sourceOffset]]
 
-f_wave_rsi() =>
-    ta.rsi(close, rsiLength)
+f_wave_rsi(sourceOffset) =>
+    ta.rsi(close, rsiLength)[sourceOffset]
 
 useAutoTf = timeframeMode == "PDF Auto"
 tideTf = useAutoTf ? f_auto_tide_tf() : tideTfInput == "" ? timeframe.period : tideTfInput
 waveTf = useAutoTf ? f_auto_wave_tf() : waveTfInput == "" ? timeframe.period : waveTfInput
-[tideBuyOk, tideSellOk, tideTi, tideBbucMtf, tideBbdcMtf, tideTiUpMtf, tideTiDownMtf, tideRsiMtf] = request.security(syminfo.tickerid, tideTf, f_tide_values(), barmerge.gaps_off, barmerge.lookahead_off)
-waveRsiMtf = request.security(syminfo.tickerid, waveTf, f_wave_rsi(), barmerge.gaps_off, barmerge.lookahead_off)
+invalidManualContext = not useAutoTf and (timeframe.in_seconds(tideTf) < timeframe.in_seconds() or (useLine2Mtf and timeframe.in_seconds(waveTf) < timeframe.in_seconds()))
+if barstate.isfirst and invalidManualContext
+    runtime.error("Manual Tide/Wave timeframes must be equal to or higher than the chart timeframe.")
+tideSourceOffset = timeframe.in_seconds(tideTf) > timeframe.in_seconds() ? 1 : 0
+waveSourceOffset = timeframe.in_seconds(waveTf) > timeframe.in_seconds() ? 1 : 0
+[tideBuyOk, tideSellOk, tideTi, tideBbucMtf, tideBbdcMtf, tideTiUpMtf, tideTiDownMtf, tideRsiMtf] = request.security(syminfo.tickerid, tideTf, f_tide_values(tideSourceOffset), barmerge.gaps_off, barmerge.lookahead_on)
+waveRsiMtf = request.security(syminfo.tickerid, waveTf, f_wave_rsi(waveSourceOffset), barmerge.gaps_off, barmerge.lookahead_on)
 line2BuySetup = useLine2Mtf and tideBbucMtf and tideTiUpMtf and (tideRsiMtf > rsiLongBase) and (waveRsiMtf > rsiLongBase)
 line2SellSetup = useLine2Mtf and tideBbdcMtf and tideTiDownMtf and (tideRsiMtf < rsiShortBase) and (waveRsiMtf < rsiShortBase)
 
