@@ -120,6 +120,38 @@ def _through_larger_abc():
     return swings
 
 
+def _through_larger_abc_cycles(count):
+    """Build valid cycles that share each prior C / next Point 0 pivot."""
+
+    if count < 1:
+        raise ValueError("count must be positive")
+    first = _through_larger_abc()
+    for _ in range(1, count):
+        first[-1] = replace(first[-1], important_extreme=True, macd_extreme=True)
+        template = _through_larger_abc()
+        position_offset = first[-1].position
+        price_offset = first[-1].price
+        for swing in template[1:]:
+            position = position_offset + swing.position
+            first.append(
+                replace(
+                    swing,
+                    position=position,
+                    confirmed_position=position + 1,
+                    index=pd.Timestamp("2025-01-01") + pd.Timedelta(days=position),
+                    confirmed_index=pd.Timestamp("2025-01-02") + pd.Timedelta(days=position),
+                    price=price_offset + swing.price,
+                    important_high=price_offset + swing.important_high,
+                    important_low=price_offset + swing.important_low,
+                )
+            )
+    return first
+
+
+def _through_two_larger_abc_cycles():
+    return _through_larger_abc_cycles(2)
+
+
 def _through_larger_wxy(*, confirmed=True):
     swings = _through_w5()
     _append_prices(swings, [160, 168, 150, 158, 140])
@@ -608,6 +640,57 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(state["active"]["waves"]["C"]["reason_code"], "C_CONFIRMED")
         self.assertEqual(state["last_reason_code"], "CORRECTION_COMPLETE")
 
+    def test_v4_completed_history_persists_while_next_cycle_forms(self):
+        swings = _through_two_larger_abc_cycles()
+        state = _run_candidate_state(swings, self.config)
+
+        self.assertEqual(len(state["completed_cycles"]), 1)
+        self.assertEqual(state["completed_cycles"][0]["cycle_id"], 0)
+        self.assertEqual(
+            list(state["completed_cycles"][0]["waves"]),
+            ["0", "1", "2", "3", "4", "5", "A", "B", "C"],
+        )
+        self.assertEqual(state["active"]["cycle_id"], 1)
+        self.assertEqual(state["active"]["parent_state"], "CORRECTION_CONFIRMED")
+        self.assertEqual(
+            state["active"]["start_idx"],
+            state["completed_cycles"][0]["waves"]["C"]["swing_idx"],
+        )
+
+    def test_v4_archived_cycle_endpoints_are_prefix_invariant(self):
+        first_only = _run_candidate_state(_through_larger_abc(), self.config)
+        two_cycles = _run_candidate_state(_through_two_larger_abc_cycles(), self.config)
+
+        expected = {
+            label: wave["swing_idx"]
+            for label, wave in first_only["active"]["waves"].items()
+        }
+        archived = {
+            label: wave["swing_idx"]
+            for label, wave in two_cycles["completed_cycles"][0]["waves"].items()
+        }
+        self.assertEqual(archived, expected)
+
+    def test_v4_history_depth_keeps_latest_three_completed_cycles(self):
+        state = _run_candidate_state(_through_larger_abc_cycles(5), self.config)
+
+        self.assertEqual(state["completed_cycle_total"], 4)
+        self.assertEqual(
+            [cycle["cycle_id"] for cycle in state["completed_cycles"]],
+            [1, 2, 3],
+        )
+        self.assertEqual(state["active"]["cycle_id"], 4)
+
+    def test_v4_history_depth_rejects_out_of_contract_values(self):
+        with self.assertRaisesRegex(ValueError, "max_completed_cycles"):
+            compute_elliott_waves(
+                pd.DataFrame(
+                    {"high": [2.0], "low": [1.0], "close": [1.5]},
+                    index=pd.to_datetime(["2025-01-01"]),
+                ),
+                replace(self.config, max_completed_cycles=4),
+            )
+
     def test_t21_double_wxy_waits_for_locked_post_y_confirmation(self):
         forming_swings = _through_larger_wxy(confirmed=False)
         start_idx = len(_through_w5()) - 1
@@ -946,6 +1029,8 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         for column in (
             "ew_raw_pivot",
             "ew_pivot",
+            "ew_labels",
+            "ew_cycle_ids",
             "ew_engine_state",
             "ew_reason_code",
             "ew_base_locked",

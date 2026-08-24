@@ -21,7 +21,7 @@ for the full setup collection is stored in the repository for future development
 | --- | --- | --- | --- |
 | GEO P Momentum signals | Indicator | Signal engine | Implemented |
 | GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
-| Elliott Wave engine | V4 full-cycle foreground overlay | V4 full-cycle state engine | Milestone-2 code complete; milestone-3 chart acceptance pending |
+| Elliott Wave engine | V4 full-cycle foreground overlay with locked history | V4 full-cycle state engine with locked history | Local lifecycle checks pass; XAUUSD 4H chart acceptance pending |
 | Remaining PDF setups | - | - | Reference material only |
 
 ## GEO P Momentum
@@ -74,8 +74,10 @@ keeps the dashboard above chart candles and now provides:
   connectors, component Fib/time gates, X-boundary validation, and V4 post-Y
   confirmation by closed 0-X break or 38.2% WXY retracement.
 - Persistent labels 0-5 followed by validated A-B-C, W-X-Y, W-X-Y-XX-Z, or
-  A-B-C-D-E, with parent-state gates
-  that prevent premature Wave 5 or correction labels.
+  A-B-C-D-E, with parent-state gates that prevent premature Wave 5 or
+  correction labels. The latest three completed cycles remain locked while a
+  new cycle forms, and the prior terminal correction pivot can seed its next
+  qualified Point 0.
 - Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.
 - HP Fibonacci opportunities remain visible during extended Wave-2 timing;
   timing can keep W2 FORMING without cancelling a structurally valid HP zone.
@@ -87,12 +89,13 @@ keeps the dashboard above chart candles and now provides:
 - Auditable pattern, subtype, Fib, time, momentum, reason, and next-condition
   output.
 
-This completes the milestone-2 Pine/Python engine code. The source-conflicted,
-instrument-specific Wave-5 extension remains explicitly blocked instead of
-being generalized. TradingView compilation/replay, candle-for-candle parity,
-performance checks, chart validation, and backtesting are the separate
-milestone-3 acceptance scope. The old modulo-style sequence is available only
-as `Legacy fixed cycle` comparison mode.
+The local Pine/Python implementation now includes the V4 lifecycle and locked
+historical-cycle behavior. The source-conflicted, instrument-specific Wave-5
+extension remains explicitly blocked instead of being generalized. Final
+acceptance still requires TradingView compilation and XAUUSD 4H replay against
+the supplied reference charts, followed by candle-for-candle parity and
+performance evidence. The old modulo-style sequence is available only as
+`Legacy fixed cycle` comparison mode.
 
 See [docs/elliott_wave_notes_rules.md](docs/elliott_wave_notes_rules.md) for the
 implemented rules and assumptions.

@@ -70,6 +70,13 @@ container. Terminal C, Y, Z, or E labels are locked on their actual pivots only
 after the relevant correction structure passes. Point 0 no longer invalidates the
 already-completed impulse during its following larger correction.
 
+When a larger correction is confirmed, its locked endpoints are archived
+before the scalar candidate state is released. The actual terminal C, Y, Z, or
+E pivot is eligible to seed the next independently qualified Point 0. The
+current forming cycle remains visible together with at most the latest three
+completed cycles; archived endpoints are not recalculated from later raw-pivot
+replacements.
+
 HP BUY/SELL is evaluated separately from Wave-2 confirmation. A completed
 correction in the 61.8%-81.2% HP Fibonacci zone remains HP-eligible while Point
 0 is protected, even when the Wave-2 time gate fails and Wave 2 remains
@@ -86,7 +93,7 @@ for compatibility.
 ## Output and Debug Fields
 
 Python preserves `ew_raw_*` fields and exports separate main/state fields,
-including `ew_label`, `ew_parent_state`, `ew_primary_pattern`,
+including `ew_label`, `ew_labels`, `ew_cycle_ids`, `ew_parent_state`, `ew_primary_pattern`,
 `ew_alternate_pattern`, `ew_subtype`, `ew_reason_code`, `ew_source_rule_id`,
 `ew_fib_anchor`, `ew_fib_value`, `ew_time_value`, `ew_macd_state`,
 `ew_internal_pattern`, `ew_hp_signal`, `ew_channel_type`,
@@ -96,29 +103,33 @@ chronological `ew_parent_alignment`, `ew_context_alignment`, and
 `ew_routed_confidence`; these fields use confirmation timestamps so future
 parent direction is never backfilled into earlier bars.
 
-Pine draws locked labels 0-5 and A-B-C, W-X-Y, W-X-Y-XX-Z, or A-B-C-D-E for supported paths and shows the same parent
-state, pattern, evidence, reason, recount, and next-condition diagnostics in its
-panel. Raw pivots that have not passed a parent gate are shown only as small
-developing labels. Higher-timeframe degree and Important H/L requests use the
-last confirmed source candle, so unfinished parent candles cannot repaint a
+`ew_labels` and `ew_cycle_ids` preserve both identities when a terminal
+correction pivot is also the next cycle's Point 0. Pine draws the same locked
+0-5 and parenthesized correction labels for supported paths and shows the same
+parent state, pattern, evidence, reason, recount, and next-condition diagnostics
+in its panel. Raw pivots that have not passed a parent gate are shown only as
+small developing labels. Higher-timeframe degree and Important H/L requests use
+the last confirmed source candle, so unfinished parent candles cannot repaint a
 closed chart-timeframe result. A manual Important H/L timeframe below the chart
 is rejected; lower locked routes remain dashboard snapshots and never drive the
 main count.
 
 ## Milestone Boundary
 
-The milestone-2 Pine/Python engine implementation is complete. The
+The source-locked Pine/Python lifecycle, including bounded historical cycles,
+is implemented and covered by deterministic local contracts. The
 instrument-specific Wave-5 extension conflict remains visibly blocked with
 `W5_EXTENSION_REQUIRES_INSTRUMENT_RULE`; the source explicitly forbids a
-universal rule. TradingView compilation/replay, candle-for-candle parity,
-performance, chart review, and backtesting remain milestone-3 acceptance work.
+universal rule. This is not final chart acceptance: TradingView compilation,
+XAUUSD 4H replay against the client references, candle-for-candle parity,
+performance, chart review, and backtesting remain required.
 
 `Legacy fixed cycle` remains selectable for historical visual comparison. It is
 not an acceptance mode.
 
 See
 [elliott_wave_implementation_checklist_v2.md](elliott_wave_implementation_checklist_v2.md)
-for the exact milestone-2 code status and milestone-3 acceptance boundary.
+for the exact local code status and TradingView acceptance boundary.
 
 ## Files
 

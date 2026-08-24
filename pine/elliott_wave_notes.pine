@@ -33,7 +33,7 @@ pivotRight = input.int(5, "Pivot right", minval=1, group=groupSwing)
 maxSwings = input.int(120, "Maximum swings retained", minval=45, maxval=120, group=groupSwing, tooltip="Core impulse extensions can require up to 85 raw pivots before Waves 1-5 are complete.")
 minSwingAtrMultiple = input.float(1.5, "Minimum swing ATR multiple", minval=0.0, step=0.1, group=groupSwing)
 minSwingRangePct = input.float(3.0, "Minimum swing % of Important H/L", minval=0.0, step=0.1, group=groupSwing) / 100.0
-showZero = input.bool(false, "Show 0 labels", group=groupSwing)
+showZero = input.bool(true, "Show 0 labels", group=groupSwing)
 
 groupStart = "Wave 1 Start"
 wave1StartMode = input.string("Important swing + oscillator", "Start filter", options=["Off", "Important swing", "Important swing + oscillator"], group=groupStart)
@@ -90,6 +90,7 @@ correctionLineColor = input.color(color.rgb(0, 160, 160), "Correction line", gro
 fibLineColor = input.color(color.rgb(0, 80, 255), "Important H/L fib", group=groupDisplay)
 labelTextColor = input.color(color.white, "Label text", group=groupDisplay)
 labelSizeInput = input.string("small", "Label size", options=["tiny", "small", "normal"], group=groupDisplay)
+maxHistoricalCycles = input.int(3, "Completed cycles retained", minval=1, maxval=3, group=groupDisplay, tooltip="V4 default keeps the latest three confirmed 0-5 plus correction cycles. Oldest completed cycles are removed first if a lower safe limit is selected.")
 
 // Fully opaque dashboard colors prevent candles, labels, and status-line text
 // from showing through the fixed table cells.
@@ -114,6 +115,12 @@ var targetLines = array.new_line()
 var anchorFibLines = array.new_line()
 var anchorFibLabels = array.new_label()
 var channelLines = array.new_line()
+var historyBars = array.new_int()
+var historyPrices = array.new_float()
+var historyLabels = array.new_string()
+var historyAbove = array.new_bool()
+var historyCycleIds = array.new_int()
+var int completedCycleCount = 0
 var table timeTable = table.new(position.top_right, 2, 7, border_width=1)
 var table degreeTable = table.new(position.bottom_right, 5, 10, border_width=1)
 
@@ -1292,8 +1299,62 @@ f_draw_locked_fib() =>
             array.push(anchorFibLines, ln)
             array.push(anchorFibLabels, lb)
 
+f_push_history_node(nodeBar, nodePrice, nodeLabel, nodeAbove, cycleId) =>
+    array.push(historyBars, nodeBar)
+    array.push(historyPrices, nodePrice)
+    array.push(historyLabels, nodeLabel)
+    array.push(historyAbove, nodeAbove)
+    array.push(historyCycleIds, cycleId)
+
+f_archive_locked_cycle(cycleId, oldestCycleToKeep) =>
+    f_push_history_node(lockedBaseBar, lockedBasePrice, "0", lockedBullish ? false : true, cycleId)
+    f_push_history_node(lockedW1Bar, lockedW1Price, "1", lockedBullish ? true : false, cycleId)
+    f_push_history_node(lockedW2Bar, lockedW2Price, "2", lockedBullish ? false : true, cycleId)
+    f_push_history_node(lockedW3Bar, lockedW3Price, "3", lockedBullish ? true : false, cycleId)
+    f_push_history_node(lockedW4Bar, lockedW4Price, "4", lockedBullish ? false : true, cycleId)
+    f_push_history_node(lockedW5Bar, lockedW5Price, "5", lockedBullish ? true : false, cycleId)
+    f_push_history_node(lockedABar, lockedAPrice, f_locked_correction_label(0), lockedBullish ? false : true, cycleId)
+    f_push_history_node(lockedBBar, lockedBPrice, f_locked_correction_label(1), lockedBullish ? true : false, cycleId)
+    f_push_history_node(lockedCBar, lockedCPrice, f_locked_correction_label(2), lockedBullish ? false : true, cycleId)
+    if not na(lockedDBar)
+        f_push_history_node(lockedDBar, lockedDPrice, f_locked_correction_label(3), lockedBullish ? true : false, cycleId)
+    if not na(lockedEBar)
+        f_push_history_node(lockedEBar, lockedEPrice, f_locked_correction_label(4), lockedBullish ? false : true, cycleId)
+    while array.size(historyCycleIds) > 0 and array.first(historyCycleIds) < oldestCycleToKeep
+        array.shift(historyBars)
+        array.shift(historyPrices)
+        array.shift(historyLabels)
+        array.shift(historyAbove)
+        array.shift(historyCycleIds)
+
+f_redraw_history() =>
+    historyCount = array.size(historyBars)
+    oldestVisibleCycle = math.max(0, completedCycleCount - maxHistoricalCycles + (engineStage == "CORRECTION_CONFIRMED" ? 1 : 0))
+    if historyCount > 0
+        for historyIndex = 0 to historyCount - 1
+            nodeBar = array.get(historyBars, historyIndex)
+            nodePrice = array.get(historyPrices, historyIndex)
+            nodeText = array.get(historyLabels, historyIndex)
+            nodeAbove = array.get(historyAbove, historyIndex)
+            cycleId = array.get(historyCycleIds, historyIndex)
+            cycleVisible = cycleId >= oldestVisibleCycle
+            isCorrectionNode = not (nodeText == "0" or nodeText == "1" or nodeText == "2" or nodeText == "3" or nodeText == "4" or nodeText == "5")
+            nodeColor = isCorrectionNode ? correctionLineColor : nodeText == "0" ? color.rgb(38, 41, 49) : nodeText == "2" or nodeText == "4" ? color.rgb(235, 62, 71) : color.rgb(255, 145, 0)
+            if cycleVisible and historyIndex > 0 and array.get(historyCycleIds, historyIndex - 1) == cycleId
+                priorBar = array.get(historyBars, historyIndex - 1)
+                priorPrice = array.get(historyPrices, historyIndex - 1)
+                segmentColor = isCorrectionNode ? correctionLineColor : impulseLineColor
+                historyLine = line.new(priorBar, priorPrice, nodeBar, nodePrice, color=segmentColor, width=2, force_overlay=true)
+                array.push(drawnLines, historyLine)
+            if cycleVisible and (showZero or nodeText != "0")
+                displayText = isCorrectionNode ? "(" + nodeText + ")" : nodeText
+                nodeStyle = nodeAbove ? label.style_label_down : label.style_label_up
+                historyLabel = label.new(nodeBar, nodePrice, text=displayText, style=nodeStyle, yloc=yloc.price, color=nodeColor, textcolor=labelTextColor, size=f_label_size(), tooltip="Locked completed cycle " + str.tostring(cycleId + 1) + ". Historical endpoints remain fixed unless a logged recount invalidates them.", force_overlay=true)
+                array.push(drawnLabels, historyLabel)
+
 f_redraw_candidate() =>
     f_clear_drawings()
+    f_redraw_history()
     if baseLocked
         ln = line.new(lockedBaseBar, lockedBasePrice, lockedW1Bar, lockedW1Price, color=impulseLineColor, width=3, force_overlay=true)
         array.push(drawnLines, ln)
@@ -1301,25 +1362,25 @@ f_redraw_candidate() =>
         w1Style = lockedBullish ? label.style_label_down : label.style_label_up
         baseLabel = label.new(lockedBaseBar, lockedBasePrice, text="0", style=baseStyle, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip="Locked Point 0. It changes only after a hard origin invalidation.", force_overlay=true)
         w1Tooltip = "CONFIRMED | " + str.tostring(lockedInternalCount) + " internal moves | degree " + str.tostring(lockedDegreeProgress * 100.0, "#.##") + "%"
-        w1Label = label.new(lockedW1Bar, lockedW1Price, text="1", style=w1Style, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=w1Tooltip, force_overlay=true)
+        w1Label = label.new(lockedW1Bar, lockedW1Price, text="1", style=w1Style, yloc=yloc.price, color=color.rgb(255, 145, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=w1Tooltip, force_overlay=true)
         array.push(drawnLabels, baseLabel)
         array.push(drawnLabels, w1Label)
         if not na(lockedW2Bar)
-            w2Line = line.new(lockedW1Bar, lockedW1Price, lockedW2Bar, lockedW2Price, color=correctionLineColor, width=3, force_overlay=true)
+            w2Line = line.new(lockedW1Bar, lockedW1Price, lockedW2Bar, lockedW2Price, color=impulseLineColor, width=3, force_overlay=true)
             w2Style = lockedBullish ? label.style_label_up : label.style_label_down
-            w2Label = label.new(lockedW2Bar, lockedW2Price, text="2", style=w2Style, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW2Pattern + " | " + lockedW2Subtype + " | retrace " + str.tostring(lockedW2Retrace * 100.0, "#.##") + "%", force_overlay=true)
+            w2Label = label.new(lockedW2Bar, lockedW2Price, text="2", style=w2Style, yloc=yloc.price, color=color.rgb(235, 62, 71), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW2Pattern + " | " + lockedW2Subtype + " | retrace " + str.tostring(lockedW2Retrace * 100.0, "#.##") + "%", force_overlay=true)
             array.push(drawnLines, w2Line)
             array.push(drawnLabels, w2Label)
         if not na(lockedW3Bar)
             w3Line = line.new(lockedW2Bar, lockedW2Price, lockedW3Bar, lockedW3Price, color=impulseLineColor, width=3, force_overlay=true)
             w3Style = lockedBullish ? label.style_label_down : label.style_label_up
-            w3Label = label.new(lockedW3Bar, lockedW3Price, text="3", style=w3Style, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW3Subtype + " | W1 projection " + str.tostring(lockedW3Ratio * 100.0, "#.##") + "%", force_overlay=true)
+            w3Label = label.new(lockedW3Bar, lockedW3Price, text="3", style=w3Style, yloc=yloc.price, color=color.rgb(255, 145, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW3Subtype + " | W1 projection " + str.tostring(lockedW3Ratio * 100.0, "#.##") + "%", force_overlay=true)
             array.push(drawnLines, w3Line)
             array.push(drawnLabels, w3Label)
         if not na(lockedW4Bar)
-            w4Line = line.new(lockedW3Bar, lockedW3Price, lockedW4Bar, lockedW4Price, color=correctionLineColor, width=3, force_overlay=true)
+            w4Line = line.new(lockedW3Bar, lockedW3Price, lockedW4Bar, lockedW4Price, color=impulseLineColor, width=3, force_overlay=true)
             w4Style = lockedBullish ? label.style_label_up : label.style_label_down
-            w4Label = label.new(lockedW4Bar, lockedW4Price, text="4", style=w4Style, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW4Pattern + " | retrace " + str.tostring(lockedW4Retrace * 100.0, "#.##") + "%", force_overlay=true)
+            w4Label = label.new(lockedW4Bar, lockedW4Price, text="4", style=w4Style, yloc=yloc.price, color=color.rgb(235, 62, 71), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW4Pattern + " | retrace " + str.tostring(lockedW4Retrace * 100.0, "#.##") + "%", force_overlay=true)
             array.push(drawnLines, w4Line)
             array.push(drawnLabels, w4Label)
             channelSlope = f_ratio(lockedW4Price - lockedW2Price, math.max(1, lockedW4Bar - lockedW2Bar))
@@ -1339,25 +1400,25 @@ f_redraw_candidate() =>
         if not na(lockedW5Bar)
             w5Line = line.new(lockedW4Bar, lockedW4Price, lockedW5Bar, lockedW5Price, color=impulseLineColor, width=3, force_overlay=true)
             w5Style = lockedBullish ? label.style_label_down : label.style_label_up
-            w5Label = label.new(lockedW5Bar, lockedW5Price, text="5", style=w5Style, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW5Subtype + " | 3-4 projection " + str.tostring(lockedW5Ratio * 100.0, "#.##") + "%", force_overlay=true)
+            w5Label = label.new(lockedW5Bar, lockedW5Price, text="5", style=w5Style, yloc=yloc.price, color=color.rgb(255, 145, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW5Subtype + " | 3-4 projection " + str.tostring(lockedW5Ratio * 100.0, "#.##") + "%", force_overlay=true)
             array.push(drawnLines, w5Line)
             array.push(drawnLabels, w5Label)
         if not na(lockedABar)
             aLine = line.new(lockedW5Bar, lockedW5Price, lockedABar, lockedAPrice, color=correctionLineColor, width=3, force_overlay=true)
             aStyle = lockedBullish ? label.style_label_up : label.style_label_down
-            aLabel = label.new(lockedABar, lockedAPrice, text=f_locked_correction_label(0), style=aStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot", force_overlay=true)
+            aLabel = label.new(lockedABar, lockedAPrice, text="(" + f_locked_correction_label(0) + ")", style=aStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot", force_overlay=true)
             array.push(drawnLines, aLine)
             array.push(drawnLabels, aLabel)
         if not na(lockedBBar)
             bLine = line.new(lockedABar, lockedAPrice, lockedBBar, lockedBPrice, color=correctionLineColor, width=3, force_overlay=true)
             bStyle = lockedBullish ? label.style_label_down : label.style_label_up
-            bLabel = label.new(lockedBBar, lockedBPrice, text=f_locked_correction_label(1), style=bStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot", force_overlay=true)
+            bLabel = label.new(lockedBBar, lockedBPrice, text="(" + f_locked_correction_label(1) + ")", style=bStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot", force_overlay=true)
             array.push(drawnLines, bLine)
             array.push(drawnLabels, bLabel)
         if not na(lockedCBar)
             cLine = line.new(lockedBBar, lockedBPrice, lockedCBar, lockedCPrice, color=correctionLineColor, width=3, force_overlay=true)
             cStyle = lockedBullish ? label.style_label_up : label.style_label_down
-            cLabel = label.new(lockedCBar, lockedCPrice, text=f_locked_correction_label(2), style=cStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | component complete", force_overlay=true)
+            cLabel = label.new(lockedCBar, lockedCPrice, text="(" + f_locked_correction_label(2) + ")", style=cStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | component complete", force_overlay=true)
             array.push(drawnLines, cLine)
             array.push(drawnLabels, cLabel)
             if str.contains(lockedCorrectionPattern, "Zig-Zag")
@@ -1370,13 +1431,13 @@ f_redraw_candidate() =>
         if not na(lockedDBar)
             dLine = line.new(lockedCBar, lockedCPrice, lockedDBar, lockedDPrice, color=correctionLineColor, width=3, force_overlay=true)
             dStyle = lockedBullish ? label.style_label_down : label.style_label_up
-            dLabel = label.new(lockedDBar, lockedDPrice, text=f_locked_correction_label(3), style=dStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot", force_overlay=true)
+            dLabel = label.new(lockedDBar, lockedDPrice, text="(" + f_locked_correction_label(3) + ")", style=dStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | confirmed component pivot", force_overlay=true)
             array.push(drawnLines, dLine)
             array.push(drawnLabels, dLabel)
         if not na(lockedEBar)
             eLine = line.new(lockedDBar, lockedDPrice, lockedEBar, lockedEPrice, color=correctionLineColor, width=3, force_overlay=true)
             eStyle = lockedBullish ? label.style_label_up : label.style_label_down
-            eLabel = label.new(lockedEBar, lockedEPrice, text=f_locked_correction_label(4), style=eStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | correction complete", force_overlay=true)
+            eLabel = label.new(lockedEBar, lockedEPrice, text="(" + f_locked_correction_label(4) + ")", style=eStyle, yloc=yloc.price, color=color.new(color.teal, 0), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedCorrectionPattern + " | correction complete", force_overlay=true)
             array.push(drawnLines, eLine)
             array.push(drawnLabels, eLabel)
         if not na(lockedTriangleTargetNear) and not na(lockedTriangleTargetFar)
@@ -1564,6 +1625,80 @@ if originBroken
 
 if changed
     if f_is_candidate_mode()
+        // A confirmed correction terminal is also eligible to become the next
+        // cycle's Point 0. Archive the locked endpoints before releasing the
+        // scalar active state; the historical arrays are never rebuilt from
+        // later raw-pivot replacements.
+        if baseLocked and engineStage == "CORRECTION_CONFIRMED"
+            terminalBar = not na(lockedEBar) ? lockedEBar : lockedCBar
+            oldestCycleToKeep = math.max(0, completedCycleCount + 1 - maxHistoricalCycles)
+            f_archive_locked_cycle(completedCycleCount, oldestCycleToKeep)
+            completedCycleCount += 1
+            searchFloorBar := terminalBar
+            baseLocked := false
+            engineStage := "SEARCHING"
+            lockedBaseBar := na
+            lockedBasePrice := na
+            lockedW1Bar := na
+            lockedW1Price := na
+            lockedAtBar := na
+            lockedDegreeProgress := na
+            lockedInternalCount := na
+            lockedW1Subtype := ""
+            lockedImportantHigh := na
+            lockedImportantLow := na
+            lockedW2Bar := na
+            lockedW2Price := na
+            lockedW2Pattern := ""
+            lockedW2Subtype := ""
+            lockedW2InternalCount := 0
+            lockedW2Retrace := na
+            lockedW3Bar := na
+            lockedW3Price := na
+            lockedW3Subtype := ""
+            lockedW3InternalCount := 0
+            lockedW3Ratio := na
+            lockedW3Macd := na
+            lockedW4Bar := na
+            lockedW4Price := na
+            lockedW4Pattern := ""
+            lockedW4Retrace := na
+            lockedW5Bar := na
+            lockedW5Price := na
+            lockedW5Subtype := ""
+            lockedW5Ratio := na
+            lockedABar := na
+            lockedAPrice := na
+            lockedBBar := na
+            lockedBPrice := na
+            lockedCBar := na
+            lockedCPrice := na
+            lockedDBar := na
+            lockedDPrice := na
+            lockedEBar := na
+            lockedEPrice := na
+            lockedCorrectionPattern := ""
+            lockedTriangleTargetNear := na
+            lockedTriangleTargetFar := na
+            lockedTriangleInvalidation := na
+            candidateState := "SEARCHING"
+            lastReasonCode := "SEARCHING_FOR_BASE"
+            primaryPattern := ""
+            alternatePattern := ""
+            currentFibAnchor := ""
+            currentFibValue := na
+            currentTimeValue := na
+            currentInternalPattern := ""
+            currentInternalCount := 0
+            currentMacdState := ""
+            currentNextCondition := "Need qualified Point 0 and Wave 1"
+            hpSignalState := ""
+            currentConfidence := na
+            currentChannelState := ""
+            currentChannelTarget := na
+            currentTargetCluster := ""
+            fbdCandidateState := ""
+            developingText := ""
         if baseLocked
             latestIndex = array.size(swingBars) - 1
             latestBar = array.get(swingBars, latestIndex)

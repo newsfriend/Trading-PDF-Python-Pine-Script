@@ -130,7 +130,36 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertIn('lastReasonCode := "CORRECTION_COMPLETE"', self.source)
         self.assertIn("f_locked_correction_label", self.source)
         for position in range(3):
-            self.assertIn(f"text=f_locked_correction_label({position})", self.source)
+            self.assertIn(f'"(" + f_locked_correction_label({position}) + ")"', self.source)
+
+    def test_completed_cycles_are_archived_and_redrawn_without_recounting(self):
+        for token in (
+            'input.int(3, "Completed cycles retained"',
+            "var historyBars = array.new_int()",
+            "var historyCycleIds = array.new_int()",
+            "f_archive_locked_cycle",
+            "f_redraw_history()",
+            'engineStage == "CORRECTION_CONFIRMED"',
+            "searchFloorBar := terminalBar",
+            "completedCycleCount += 1",
+        ):
+            self.assertIn(token, self.source)
+        archive_call = self.source.index(
+            "f_archive_locked_cycle(completedCycleCount, oldestCycleToKeep)"
+        )
+        release = self.source.index("baseLocked := false", archive_call)
+        redraw = self.source.index("f_redraw_history()", self.source.index("f_redraw_candidate"))
+        self.assertLess(archive_call, release)
+        self.assertLess(redraw, archive_call)
+
+    def test_active_and_archived_cycles_share_reference_label_grammar(self):
+        for color in (
+            "color.rgb(255, 145, 0)",
+            "color.rgb(235, 62, 71)",
+            "correctionLineColor",
+        ):
+            self.assertIn(color, self.source)
+        self.assertIn('displayText = isCorrectionNode ? "(" + nodeText + ")"', self.source)
 
     def test_v4_closed_bar_alert_contract_is_present(self):
         for alert_name in (
@@ -182,8 +211,8 @@ class ElliottWavePineContractTests(unittest.TestCase):
             "RUNNING_EXPANDING",
         ):
             self.assertIn(subtype, self.source)
-        self.assertIn("text=f_locked_correction_label(3)", self.source)
-        self.assertIn("text=f_locked_correction_label(4)", self.source)
+        self.assertIn('"(" + f_locked_correction_label(3) + ")"', self.source)
+        self.assertIn('"(" + f_locked_correction_label(4) + ")"', self.source)
         for field in (
             "lockedTriangleTargetNear",
             "lockedTriangleTargetFar",

@@ -69,6 +69,7 @@ class ElliottWaveConfig:
     pivot_left: int = 5
     pivot_right: int = 5
     max_swings: int = 120
+    max_completed_cycles: int = 3
     min_swing_atr_multiple: float = 1.5
     min_swing_range_pct: float = 0.03
     correction_pattern: str = "A-B-C"
@@ -422,6 +423,8 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         raise ValueError(f"anchor_direction must be one of {sorted(valid_anchor_directions)}")
     if cfg.important_lookback < 10:
         raise ValueError("important_lookback must be at least 10 bars")
+    if not 1 <= cfg.max_completed_cycles <= 3:
+        raise ValueError("max_completed_cycles must be between 1 and 3")
     positive_lengths = {
         "pivot_left": cfg.pivot_left,
         "pivot_right": cfg.pivot_right,
@@ -647,9 +650,6 @@ def _build_swings(pivots: list[_Swing], cfg: ElliottWaveConfig) -> list[_Swing]:
         elif _passes_swing_filter(pivot, last, cfg):
             swings.append(pivot)
 
-        if len(swings) > cfg.max_swings:
-            swings = swings[-cfg.max_swings:]
-
     return swings
 
 
@@ -671,6 +671,8 @@ def _compute_candidate_state(
     object_columns = (
         "ew_confirmed_at",
         "ew_label",
+        "ew_labels",
+        "ew_cycle_ids",
         "ew_correction_pattern",
         "ew_rule_state",
         "ew_rule_note",
@@ -737,13 +739,27 @@ def _compute_candidate_state(
             result.loc[event_index, column] = value
 
     active = lifecycle["active"]
+    archived_cycles = list(lifecycle["completed_cycles"])
+    if (
+        active is not None
+        and str(active["parent_state"]) == "CORRECTION_CONFIRMED"
+        and len(archived_cycles) >= cfg.max_completed_cycles
+    ):
+        archived_slots = cfg.max_completed_cycles - 1
+        archived_cycles = archived_cycles[-archived_slots:] if archived_slots else []
+    render_cycles = [*archived_cycles]
     if active is not None:
-        base = swings[active["start_idx"]]
-        direction = "bullish" if active["bullish"] else "bearish"
+        render_cycles.append(active)
+
+    for cycle in render_cycles:
+        cycle_id = int(cycle["cycle_id"])
+        cycle_complete = str(cycle["parent_state"]) == "CORRECTION_CONFIRMED"
+        base = swings[cycle["start_idx"]]
+        direction = "bullish" if cycle["bullish"] else "bearish"
         degree_name, degree_timeframe = _degree_metadata(cfg)
         common = {
             "ew_pivot": True,
-            "ew_cycle": lifecycle["recount_count"],
+            "ew_cycle": cycle_id,
             "ew_rule_state": "ok",
             "ew_start_confirmed": True,
             "ew_anchor_direction": direction,
@@ -755,32 +771,43 @@ def _compute_candidate_state(
             "ew_base_locked": True,
             "ew_base_price": base.price,
             "ew_base_position": base.position,
-            "ew_w1_degree_progress": active["degree_progress"],
-            "ew_internal_count": active["internal_count"],
+            "ew_w1_degree_progress": cycle["degree_progress"],
+            "ew_internal_count": cycle["internal_count"],
             "ew_recount_count": lifecycle["recount_count"],
             "ew_alternate_bases": lifecycle["alternate_count"],
-            "ew_parent_state": active["parent_state"],
+            "ew_parent_state": cycle["parent_state"],
             "ew_time_rule_mode": cfg.time_rule_mode,
         }
         for fib_ratio, fib_name in _FIB_LEVELS:
             common[f"ew_anchor_fib_{fib_name}"] = _anchor_fib_price(base, fib_ratio)
 
         phase_by_label = {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "A": 6, "B": 7, "C": 8, "D": 9, "E": 10}
-        for label, wave in active["waves"].items():
-            phase = phase_by_label[label]
+        for label, wave in cycle["waves"].items():
+            phase = phase_by_label.get(label, 8)
             swing = swings[int(wave["swing_idx"])]
             for column, value in common.items():
                 result.loc[swing.index, column] = value
             result.loc[swing.index, "ew_confirmed_at"] = swing.confirmed_index
             result.loc[swing.index, "ew_phase"] = phase
             result.loc[swing.index, "ew_label"] = label
+            prior_labels = result.loc[swing.index, "ew_labels"]
+            label_parts = [] if pd.isna(prior_labels) else str(prior_labels).split(" / ")
+            if label not in label_parts:
+                label_parts.append(label)
+            result.loc[swing.index, "ew_labels"] = " / ".join(label_parts)
+            prior_cycle_ids = result.loc[swing.index, "ew_cycle_ids"]
+            cycle_parts = [] if pd.isna(prior_cycle_ids) else str(prior_cycle_ids).split(" / ")
+            cycle_text = str(cycle_id)
+            if cycle_text not in cycle_parts:
+                cycle_parts.append(cycle_text)
+            result.loc[swing.index, "ew_cycle_ids"] = " / ".join(cycle_parts)
             result.loc[swing.index, "ew_candidate_label"] = label
             result.loc[swing.index, "ew_pattern"] = wave["pattern"]
             result.loc[swing.index, "ew_subtype"] = wave["subtype"]
             result.loc[swing.index, "ew_reason_code"] = wave["reason_code"]
             result.loc[swing.index, "ew_source_rule_id"] = wave["source_rule_id"]
             result.loc[swing.index, "ew_rule_note"] = wave["note"]
-            result.loc[swing.index, "ew_next_condition"] = active["next_condition"]
+            result.loc[swing.index, "ew_next_condition"] = cycle["next_condition"]
             result.loc[swing.index, "ew_correction_pattern"] = wave.get("pattern", "")
             result.loc[swing.index, "ew_primary_pattern"] = wave.get("pattern", "")
             result.loc[swing.index, "ew_alternate_pattern"] = wave.get("alternate", "")
@@ -816,13 +843,22 @@ def _compute_candidate_state(
             result.loc[swing.index, "ew_support_evidence"] = wave.get(
                 "support_evidence", ""
             )
+            if cycle_complete:
+                result.loc[swing.index, "ew_engine_state"] = "CONFIRMED"
 
+    completed_cycle_count = int(lifecycle["completed_cycle_total"])
+    if active is not None and str(active["parent_state"]) == "CORRECTION_CONFIRMED":
+        completed_cycle_count += 1
     result.attrs["elliott_wave_state"] = {
         "engine": "Candidate State",
         "phase": "V4.0 motive and larger-correction sequence",
         "state": active["parent_state"] if active is not None else lifecycle["final_state"],
         "base_locked": active is not None,
         "confirmed_labels": list(active["waves"].keys()) if active is not None else [],
+        "completed_cycle_count": completed_cycle_count,
+        "completed_cycle_ids": [
+            int(cycle["cycle_id"]) for cycle in archived_cycles
+        ],
         "recount_count": lifecycle["recount_count"],
         "alternate_base_count": lifecycle["alternate_count"],
         "last_reason_code": lifecycle["last_reason_code"],
@@ -854,6 +890,8 @@ def _run_candidate_state(
 
     events: list[dict[str, object]] = []
     active: dict[str, object] | None = None
+    completed_cycles: list[dict[str, object]] = []
+    next_cycle_id = 0
     search_floor = -1
     recount_count = 0
     alternate_count = 0
@@ -866,6 +904,14 @@ def _run_candidate_state(
 
     for swing_index in ordered_indices:
         swing = swings[swing_index]
+        if active is not None and str(active["parent_state"]) == "CORRECTION_CONFIRMED":
+            completed_cycles.append(_snapshot_completed_cycle(active))
+            next_cycle_id = int(active["cycle_id"]) + 1
+            completed_cycles = completed_cycles[-cfg.max_completed_cycles :]
+            terminal_idx = int(list(active["waves"].values())[-1]["swing_idx"])
+            search_floor = swings[terminal_idx].position
+            active = None
+
         if active is not None and _origin_protection_active(str(active["parent_state"])):
             break_position = _origin_break_position(
                 source,
@@ -909,6 +955,7 @@ def _run_candidate_state(
                 active = candidate
                 active.update(
                     {
+                        "cycle_id": next_cycle_id,
                         "last_checked_position": swing.confirmed_position,
                         "parent_state": "W2_CORRECTION_CONTAINER",
                         "next_condition": "Need a valid W2 correction completion while Point 0 remains intact.",
@@ -1070,12 +1117,25 @@ def _run_candidate_state(
 
     return {
         "active": active,
+        "completed_cycles": completed_cycles,
+        "completed_cycle_total": next_cycle_id,
         "events": events,
         "recount_count": recount_count,
         "alternate_count": alternate_count,
         "final_state": "SEARCHING" if active is None else str(active["parent_state"]),
         "last_reason_code": last_reason_code,
     }
+
+
+def _snapshot_completed_cycle(active: dict[str, object]) -> dict[str, object]:
+    """Copy a locked cycle before the lifecycle searches for its successor."""
+
+    snapshot = dict(active)
+    snapshot["waves"] = {
+        str(label): dict(wave)
+        for label, wave in dict(active["waves"]).items()
+    }
+    return snapshot
 
 
 def _make_wave_record(

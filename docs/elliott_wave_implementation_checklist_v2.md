@@ -41,6 +41,7 @@ The older manuals and chart images remain supporting references.
 | Wave 4 correction container and W5 gate | DONE IN CODE | All supported correction families, Base-to-W3 retracement, overlap, time, thrust/channel evidence, and the no-premature-W5 gate are implemented. |
 | Wave 5 normal/truncated/ED classifier | DONE IN CODE | Normal, double-extension truncated, and ending-diagonal paths include time, divergence, W3-not-shortest, channel/cluster, and FBD/FBO support. The source-conflicted instrument-specific W5 extension is explicitly blocked with `W5_EXTENSION_REQUIRES_INSTRUMENT_RULE`; it is never generalized. |
 | Persistent confirmed labels 0-5 | DONE for supported core paths | Pine and Python lock each main wave only after its parent-state rules pass; later raw pivots remain developing candidates. |
+| Retain completed historical cycles | DONE IN CODE | The current forming count and latest three completed cycles are rendered independently. A locked terminal correction can seed the next Point 0, and archive-prefix regression tests prevent later pivots from moving completed endpoints. |
 | Phase 2 regression cases T02-T13 | DONE in Python | Tests cover normal/microscopic W2, Flat B at/above 111%, trending/terminal/extended W3, W4 completion/overlap gating, and normal/truncated W5. Pine has matching static contract tests; TradingView compilation is still required. |
 
 ## Remaining Modules
@@ -79,5 +80,6 @@ python -m unittest tests.test_elliott_wave_state_engine -v
 python -m unittest tests.test_elliott_wave_pine_contract -v
 ```
 
-Those commands verify milestone 2 locally. Pine Editor compilation, chart replay,
-performance, candle parity, and backtesting are milestone-3 acceptance work.
+Those commands verify the deterministic local contracts. Pine Editor
+compilation, XAUUSD 4H chart replay against the supplied references,
+performance, candle parity, and backtesting are still required for acceptance.
