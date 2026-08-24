@@ -78,6 +78,9 @@ keeps the dashboard above chart candles and now provides:
   correction labels. The latest three completed cycles remain locked while a
   new cycle forms, and the prior terminal correction pivot can seed its next
   qualified Point 0.
+- Reference-style combined Wave-2/Wave-4 labels retain the parent number while
+  showing the completed child terminal, for example `4 (C)`, `4 (Y)`, or
+  `4 (E)`, without promoting the child pivot to another main wave.
 - Closed-bar FORMING, CONFIRMED, INVALID, recount, correction-complete, and HP alerts.
 - HP Fibonacci opportunities remain visible during extended Wave-2 timing;
   timing can keep W2 FORMING without cancelling a structurally valid HP zone.

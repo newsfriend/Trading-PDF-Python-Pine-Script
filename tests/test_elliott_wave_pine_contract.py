@@ -122,7 +122,12 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.assertIn(token, self.source)
 
     def test_locked_main_labels_include_complete_impulse(self):
-        for label in ('text="2"', 'text="3"', 'text="4"', 'text="5"'):
+        for label in (
+            'text=f_parent_correction_label("2", lockedW2Pattern)',
+            'text="3"',
+            'text=f_parent_correction_label("4", lockedW4Pattern)',
+            'text="5"',
+        ):
             self.assertIn(label, self.source)
 
     def test_completed_impulse_opens_and_draws_larger_abc(self):
@@ -160,6 +165,9 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(color, self.source)
         self.assertIn('displayText = isCorrectionNode ? "(" + nodeText + ")"', self.source)
+        self.assertIn("f_parent_correction_label", self.source)
+        self.assertIn('f_parent_correction_label("2", lockedW2Pattern)', self.source)
+        self.assertIn('f_parent_correction_label("4", lockedW4Pattern)', self.source)
 
     def test_v4_closed_bar_alert_contract_is_present(self):
         for alert_name in (

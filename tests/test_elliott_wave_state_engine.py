@@ -13,6 +13,7 @@ from python.elliott_wave_notes import (
     _evaluate_correction,
     _correction_rank_key,
     _degree_alignment_series,
+    _display_wave_label,
     _evaluate_double_correction,
     _evaluate_diagonal,
     _impulse_channel_evidence,
@@ -657,6 +658,13 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             state["completed_cycles"][0]["waves"]["C"]["swing_idx"],
         )
 
+    def test_v4_display_labels_preserve_parent_and_child_correction_identity(self):
+        self.assertEqual(_display_wave_label("2", "Flat"), "2\n(C)")
+        self.assertEqual(_display_wave_label("4", "W-X-Y"), "4\n(Y)")
+        self.assertEqual(_display_wave_label("4", "W-X-Y-XX-Z"), "4\n(Z)")
+        self.assertEqual(_display_wave_label("4", "Triangle"), "4\n(E)")
+        self.assertEqual(_display_wave_label("A", "Zig-Zag"), "(A)")
+
     def test_v4_archived_cycle_endpoints_are_prefix_invariant(self):
         first_only = _run_candidate_state(_through_larger_abc(), self.config)
         two_cycles = _run_candidate_state(_through_two_larger_abc_cycles(), self.config)
@@ -1030,6 +1038,8 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             "ew_raw_pivot",
             "ew_pivot",
             "ew_labels",
+            "ew_display_label",
+            "ew_display_labels",
             "ew_cycle_ids",
             "ew_engine_state",
             "ew_reason_code",

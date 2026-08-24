@@ -204,6 +204,12 @@ f_label_size() =>
 f_locked_correction_label(position) =>
     lockedCorrectionPattern == "W-X-Y" ? (position == 0 ? "W" : position == 1 ? "X" : "Y") : lockedCorrectionPattern == "W-X-Y-XX-Z" ? (position == 0 ? "W" : position == 1 ? "X" : position == 2 ? "Y" : position == 3 ? "XX" : "Z") : position == 0 ? "A" : position == 1 ? "B" : position == 2 ? "C" : position == 3 ? "D" : "E"
 
+f_correction_terminal_label(pattern) =>
+    str.contains(pattern, "W-X-Y-XX-Z") ? "Z" : str.contains(pattern, "W-X-Y") ? "Y" : str.contains(pattern, "Triangle") ? "E" : "C"
+
+f_parent_correction_label(parentLabel, pattern) =>
+    parentLabel + "\n(" + f_correction_terminal_label(pattern) + ")"
+
 f_correction_count() =>
     correctionPattern == "W-X-Y-XX-Z" or correctionPattern == "A-B-C-D-E" ? 5 : 3
 
@@ -1309,9 +1315,9 @@ f_push_history_node(nodeBar, nodePrice, nodeLabel, nodeAbove, cycleId) =>
 f_archive_locked_cycle(cycleId, oldestCycleToKeep) =>
     f_push_history_node(lockedBaseBar, lockedBasePrice, "0", lockedBullish ? false : true, cycleId)
     f_push_history_node(lockedW1Bar, lockedW1Price, "1", lockedBullish ? true : false, cycleId)
-    f_push_history_node(lockedW2Bar, lockedW2Price, "2", lockedBullish ? false : true, cycleId)
+    f_push_history_node(lockedW2Bar, lockedW2Price, f_parent_correction_label("2", lockedW2Pattern), lockedBullish ? false : true, cycleId)
     f_push_history_node(lockedW3Bar, lockedW3Price, "3", lockedBullish ? true : false, cycleId)
-    f_push_history_node(lockedW4Bar, lockedW4Price, "4", lockedBullish ? false : true, cycleId)
+    f_push_history_node(lockedW4Bar, lockedW4Price, f_parent_correction_label("4", lockedW4Pattern), lockedBullish ? false : true, cycleId)
     f_push_history_node(lockedW5Bar, lockedW5Price, "5", lockedBullish ? true : false, cycleId)
     f_push_history_node(lockedABar, lockedAPrice, f_locked_correction_label(0), lockedBullish ? false : true, cycleId)
     f_push_history_node(lockedBBar, lockedBPrice, f_locked_correction_label(1), lockedBullish ? true : false, cycleId)
@@ -1338,8 +1344,9 @@ f_redraw_history() =>
             nodeAbove = array.get(historyAbove, historyIndex)
             cycleId = array.get(historyCycleIds, historyIndex)
             cycleVisible = cycleId >= oldestVisibleCycle
-            isCorrectionNode = not (nodeText == "0" or nodeText == "1" or nodeText == "2" or nodeText == "3" or nodeText == "4" or nodeText == "5")
-            nodeColor = isCorrectionNode ? correctionLineColor : nodeText == "0" ? color.rgb(38, 41, 49) : nodeText == "2" or nodeText == "4" ? color.rgb(235, 62, 71) : color.rgb(255, 145, 0)
+            nodePrefix = str.substring(nodeText, 0, 1)
+            isCorrectionNode = not (nodePrefix == "0" or nodePrefix == "1" or nodePrefix == "2" or nodePrefix == "3" or nodePrefix == "4" or nodePrefix == "5")
+            nodeColor = isCorrectionNode ? correctionLineColor : nodePrefix == "0" ? color.rgb(38, 41, 49) : nodePrefix == "2" or nodePrefix == "4" ? color.rgb(235, 62, 71) : color.rgb(255, 145, 0)
             if cycleVisible and historyIndex > 0 and array.get(historyCycleIds, historyIndex - 1) == cycleId
                 priorBar = array.get(historyBars, historyIndex - 1)
                 priorPrice = array.get(historyPrices, historyIndex - 1)
@@ -1368,7 +1375,7 @@ f_redraw_candidate() =>
         if not na(lockedW2Bar)
             w2Line = line.new(lockedW1Bar, lockedW1Price, lockedW2Bar, lockedW2Price, color=impulseLineColor, width=3, force_overlay=true)
             w2Style = lockedBullish ? label.style_label_up : label.style_label_down
-            w2Label = label.new(lockedW2Bar, lockedW2Price, text="2", style=w2Style, yloc=yloc.price, color=color.rgb(235, 62, 71), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW2Pattern + " | " + lockedW2Subtype + " | retrace " + str.tostring(lockedW2Retrace * 100.0, "#.##") + "%", force_overlay=true)
+            w2Label = label.new(lockedW2Bar, lockedW2Price, text=f_parent_correction_label("2", lockedW2Pattern), style=w2Style, yloc=yloc.price, color=color.rgb(235, 62, 71), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW2Pattern + " | " + lockedW2Subtype + " | retrace " + str.tostring(lockedW2Retrace * 100.0, "#.##") + "%", force_overlay=true)
             array.push(drawnLines, w2Line)
             array.push(drawnLabels, w2Label)
         if not na(lockedW3Bar)
@@ -1380,7 +1387,7 @@ f_redraw_candidate() =>
         if not na(lockedW4Bar)
             w4Line = line.new(lockedW3Bar, lockedW3Price, lockedW4Bar, lockedW4Price, color=impulseLineColor, width=3, force_overlay=true)
             w4Style = lockedBullish ? label.style_label_up : label.style_label_down
-            w4Label = label.new(lockedW4Bar, lockedW4Price, text="4", style=w4Style, yloc=yloc.price, color=color.rgb(235, 62, 71), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW4Pattern + " | retrace " + str.tostring(lockedW4Retrace * 100.0, "#.##") + "%", force_overlay=true)
+            w4Label = label.new(lockedW4Bar, lockedW4Price, text=f_parent_correction_label("4", lockedW4Pattern), style=w4Style, yloc=yloc.price, color=color.rgb(235, 62, 71), textcolor=labelTextColor, size=f_label_size(), tooltip=lockedW4Pattern + " | retrace " + str.tostring(lockedW4Retrace * 100.0, "#.##") + "%", force_overlay=true)
             array.push(drawnLines, w4Line)
             array.push(drawnLabels, w4Label)
             channelSlope = f_ratio(lockedW4Price - lockedW2Price, math.max(1, lockedW4Bar - lockedW2Bar))

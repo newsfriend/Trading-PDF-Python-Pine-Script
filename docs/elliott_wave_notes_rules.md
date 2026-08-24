@@ -93,7 +93,8 @@ for compatibility.
 ## Output and Debug Fields
 
 Python preserves `ew_raw_*` fields and exports separate main/state fields,
-including `ew_label`, `ew_labels`, `ew_cycle_ids`, `ew_parent_state`, `ew_primary_pattern`,
+including `ew_label`, `ew_labels`, `ew_display_label`, `ew_display_labels`,
+`ew_cycle_ids`, `ew_parent_state`, `ew_primary_pattern`,
 `ew_alternate_pattern`, `ew_subtype`, `ew_reason_code`, `ew_source_rule_id`,
 `ew_fib_anchor`, `ew_fib_value`, `ew_time_value`, `ew_macd_state`,
 `ew_internal_pattern`, `ew_hp_signal`, `ew_channel_type`,
@@ -104,8 +105,11 @@ chronological `ew_parent_alignment`, `ew_context_alignment`, and
 parent direction is never backfilled into earlier bars.
 
 `ew_labels` and `ew_cycle_ids` preserve both identities when a terminal
-correction pivot is also the next cycle's Point 0. Pine draws the same locked
-0-5 and parenthesized correction labels for supported paths and shows the same
+correction pivot is also the next cycle's Point 0. `ew_display_label` adds only
+presentation grammar: confirmed Wave 2 and Wave 4 retain their parent numbers
+while showing the child correction terminal, such as `4 (C)`, `4 (Y)`, or
+`4 (E)`. Pine draws the same locked 0-5 and parenthesized correction labels for
+supported paths and shows the same
 parent state, pattern, evidence, reason, recount, and next-condition diagnostics
 in its panel. Raw pivots that have not passed a parent gate are shown only as
 small developing labels. Higher-timeframe degree and Important H/L requests use

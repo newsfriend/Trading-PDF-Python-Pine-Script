@@ -672,6 +672,8 @@ def _compute_candidate_state(
         "ew_confirmed_at",
         "ew_label",
         "ew_labels",
+        "ew_display_label",
+        "ew_display_labels",
         "ew_cycle_ids",
         "ew_correction_pattern",
         "ew_rule_state",
@@ -785,6 +787,7 @@ def _compute_candidate_state(
         for label, wave in cycle["waves"].items():
             phase = phase_by_label.get(label, 8)
             swing = swings[int(wave["swing_idx"])]
+            display_label = _display_wave_label(label, str(wave["pattern"]))
             for column, value in common.items():
                 result.loc[swing.index, column] = value
             result.loc[swing.index, "ew_confirmed_at"] = swing.confirmed_index
@@ -795,6 +798,16 @@ def _compute_candidate_state(
             if label not in label_parts:
                 label_parts.append(label)
             result.loc[swing.index, "ew_labels"] = " / ".join(label_parts)
+            result.loc[swing.index, "ew_display_label"] = display_label
+            prior_display_labels = result.loc[swing.index, "ew_display_labels"]
+            display_parts = (
+                []
+                if pd.isna(prior_display_labels)
+                else str(prior_display_labels).split(" / ")
+            )
+            if display_label not in display_parts:
+                display_parts.append(display_label)
+            result.loc[swing.index, "ew_display_labels"] = " / ".join(display_parts)
             prior_cycle_ids = result.loc[swing.index, "ew_cycle_ids"]
             cycle_parts = [] if pd.isna(prior_cycle_ids) else str(prior_cycle_ids).split(" / ")
             cycle_text = str(cycle_id)
@@ -1136,6 +1149,28 @@ def _snapshot_completed_cycle(active: dict[str, object]) -> dict[str, object]:
         for label, wave in dict(active["waves"]).items()
     }
     return snapshot
+
+
+def _correction_terminal_label(pattern: str) -> str:
+    """Return the child correction terminal shown beside a parent W2/W4."""
+
+    if "W-X-Y-XX-Z" in pattern:
+        return "Z"
+    if "W-X-Y" in pattern:
+        return "Y"
+    if "Triangle" in pattern:
+        return "E"
+    return "C"
+
+
+def _display_wave_label(label: str, pattern: str) -> str:
+    """Keep machine labels stable while matching the reference chart grammar."""
+
+    if label in {"2", "4"}:
+        return f"{label}\n({_correction_terminal_label(pattern)})"
+    if label not in {"0", "1", "2", "3", "4", "5"}:
+        return f"({label})"
+    return label
 
 
 def _make_wave_record(
