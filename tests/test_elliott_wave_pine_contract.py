@@ -454,6 +454,17 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.source)
 
+    def test_client_fib_ladder_uses_previous_structure_and_readable_labels(self):
+        for token in (
+            "f_structural_fib_price(ratio)",
+            "previousCycleEnd",
+            "for fibIndex = 0 to 8",
+            "extend=extend.both",
+            "size=size.normal",
+            "f_draw_anchor_fib(latestAnchor, structuralAllSwings)",
+        ):
+            self.assertIn(token, self.source)
+
     def test_searching_state_keeps_a_non_authoritative_structural_wave_map(self):
         for token in (
             'indicator("Elliott Wave Notes Overlay v4.2 Multi-Cycle"',

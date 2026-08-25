@@ -1454,17 +1454,33 @@ f_anchor_fib_price(anchorIndex, ratio) =>
     anchorType = array.get(swingTypes, anchorIndex)
     not na(importantRange) and importantRange > 0 ? (anchorType == -1 ? importantLow + importantRange * ratio : importantHigh - importantRange * ratio) : na
 
-f_draw_anchor_fib(anchorIndex) =>
+f_structural_fib_price(ratio) =>
+    count = array.size(swingPrices)
+    latestPhase = count > 0 ? f_phase(count - 1) : -1
+    previousCycleEnd = count > 0 ? count - 1 - latestPhase - 1 : -1
+    previousCycleStart = previousCycleEnd >= 0 ? math.max(0, previousCycleEnd - f_cycle_length() + 1) : -1
+    float cycleHigh = na
+    float cycleLow = na
+    if previousCycleStart >= 0 and previousCycleEnd > previousCycleStart
+        for i = previousCycleStart to previousCycleEnd
+            price = array.get(swingPrices, i)
+            cycleHigh := na(cycleHigh) ? price : math.max(cycleHigh, price)
+            cycleLow := na(cycleLow) ? price : math.min(cycleLow, price)
+    cycleRange = cycleHigh - cycleLow
+    not na(cycleRange) and cycleRange > 0 ? cycleHigh - cycleRange * ratio : na
+
+f_draw_anchor_fib(anchorIndex, structuralRange) =>
     if showAnchorFib and anchorIndex >= 0 and array.size(swingBars) > anchorIndex
         anchorBar = array.get(swingBars, anchorIndex)
         if f_bar_drawable(anchorBar)
-            for fibIndex = 0 to 9
+            for fibIndex = 0 to 8
                 ratio = f_fib_ratio(fibIndex)
-                price = f_anchor_fib_price(anchorIndex, ratio)
+                structuralPrice = structuralRange ? f_structural_fib_price(ratio) : na
+                price = not na(structuralPrice) ? structuralPrice : f_anchor_fib_price(anchorIndex, ratio)
                 if not na(price)
-                    opacity = ratio == 0.0 or ratio == 1.0 ? 35 : 55
-                    ln = line.new(anchorBar, price, bar_index, price, extend=extend.right, color=color.new(fibLineColor, opacity), width=1, force_overlay=true)
-                    lb = label.new(bar_index, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.tiny, force_overlay=true)
+                    opacity = ratio == 0.0 or ratio == 1.0 ? 15 : 35
+                    ln = line.new(anchorBar, price, bar_index, price, extend=extend.both, color=color.new(fibLineColor, opacity), width=1, force_overlay=true)
+                    lb = label.new(bar_index, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.normal, force_overlay=true)
                     array.push(anchorFibLines, ln)
                     array.push(anchorFibLabels, lb)
 
@@ -1695,7 +1711,7 @@ f_redraw(clearFirst, showFibGuides, showWaveTargets, structuralAllSwings) =>
     if count > 0
         latestAnchor = structuralAllSwings ? f_latest_context_anchor_index(count - 1) : f_valid_anchor_index(count - 1)
         if showFibGuides
-            f_draw_anchor_fib(latestAnchor)
+            f_draw_anchor_fib(latestAnchor, structuralAllSwings)
         for i = 0 to count - 1
             b = array.get(swingBars, i)
             p = array.get(swingPrices, i)
