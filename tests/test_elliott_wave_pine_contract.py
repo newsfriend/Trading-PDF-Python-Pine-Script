@@ -462,7 +462,10 @@ class ElliottWavePineContractTests(unittest.TestCase):
             "extend=extend.both",
             "size=size.normal",
             "chart.right_visible_bar_time",
+            "chart.left_visible_bar_time",
+            "visibleSpan * 0.84",
             "xloc=xloc.bar_time",
+            "style=label.style_none",
             "f_draw_anchor_fib(latestAnchor, structuralAllSwings)",
         ):
             self.assertIn(token, self.source)
