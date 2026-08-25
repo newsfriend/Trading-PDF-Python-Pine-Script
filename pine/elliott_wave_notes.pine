@@ -1481,12 +1481,12 @@ f_draw_anchor_fib(anchorIndex, structuralRange) =>
                     opacity = ratio == 0.0 or ratio == 1.0 ? 15 : 35
                     ln = line.new(anchorBar, price, bar_index, price, extend=extend.both, color=color.new(fibLineColor, opacity), width=1, force_overlay=true)
                     // Visible-chart coordinates trigger a recalculation when
-                    // the user pans or zooms. Place text inside the viewport
-                    // instead of exactly on its right boundary, where the
-                    // price scale can clip it.
+                    // the user pans or zooms. Keep the anchor just inside the
+                    // right edge and make the label extend leftward so the
+                    // price scale cannot clip its text.
                     visibleSpan = chart.right_visible_bar_time - chart.left_visible_bar_time
-                    fibLabelTime = chart.left_visible_bar_time + int(visibleSpan * 0.84)
-                    lb = label.new(fibLabelTime, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", xloc=xloc.bar_time, style=label.style_none, yloc=yloc.price, textcolor=fibLineColor, size=size.normal, force_overlay=true)
+                    fibLabelTime = chart.left_visible_bar_time + int(visibleSpan * 0.97)
+                    lb = label.new(fibLabelTime, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", xloc=xloc.bar_time, style=label.style_label_right, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.normal, force_overlay=true)
                     array.push(anchorFibLines, ln)
                     array.push(anchorFibLabels, lb)
 
