@@ -56,11 +56,11 @@ class ElliottWavePineContractTests(unittest.TestCase):
 
     def test_dashboard_preserves_original_positions_in_the_foreground(self):
         self.assertIn(
-            'indicator("Elliott Wave Notes Overlay", overlay=true, behind_chart=false',
+            'indicator("Elliott Wave Notes Overlay v4.2 Multi-Cycle", overlay=true, behind_chart=false',
             self.source,
         )
         self.assertIn(
-            'input.string("Full", "Dashboard", options=["Compact", "Full", "Hidden"]',
+            'input.string("Hidden", "Dashboard", options=["Compact", "Full", "Hidden"]',
             self.source,
         )
         self.assertIn(
@@ -441,7 +441,9 @@ class ElliottWavePineContractTests(unittest.TestCase):
 
     def test_searching_state_keeps_a_non_authoritative_structural_wave_map(self):
         for token in (
+            'indicator("Elliott Wave Notes Overlay v4.2 Multi-Cycle"',
             'showSearchWaveMap = input.bool(true',
+            'dashboardMode = input.string("Hidden"',
             'candidateState == "SEARCHING"',
             "completedCycleCount == 0",
             "if barstate.islast and f_is_candidate_mode() and showSearchWaveMap",

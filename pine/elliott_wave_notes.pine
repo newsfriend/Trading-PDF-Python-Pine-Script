@@ -1,5 +1,5 @@
 //@version=6
-indicator("Elliott Wave Notes Overlay", overlay=true, behind_chart=false, max_lines_count=500, max_labels_count=500)
+indicator("Elliott Wave Notes Overlay v4.2 Multi-Cycle", overlay=true, behind_chart=false, max_lines_count=500, max_labels_count=500)
 
 // Post-Y confirmation uses a runtime-calculated close[offset]. Pine cannot
 // always infer the required historical buffer for dynamic offsets, so size
@@ -90,7 +90,7 @@ showWave4Internal = input.bool(true, "Show Wave 4 internal A/B/C", group=groupDi
 countDisplayMode = input.string("Validated Anchor", "Count mode", options=["Validated Anchor", "All swings"], group=groupDisplay)
 showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
 showAnchorFib = input.bool(true, "Show Important H/L fib guide", group=groupDisplay)
-dashboardMode = input.string("Full", "Dashboard", options=["Compact", "Full", "Hidden"], group=groupDisplay, tooltip="Full preserves the original nine-route dashboard. Compact shows the active route and its neighbors; Hidden removes the tables.")
+dashboardMode = input.string("Hidden", "Dashboard", options=["Compact", "Full", "Hidden"], group=groupDisplay, tooltip="Hidden is the client-reference visual default. Full preserves the nine-route diagnostics; Compact shows only the active route and its neighbors.")
 showTimeTable = input.bool(true, "Show state/evidence table", group=groupDisplay)
 showDegreeDashboard = input.bool(true, "Show degree router", group=groupDisplay)
 impulseLineColor = input.color(color.rgb(255, 128, 0), "Impulse line", group=groupDisplay)
