@@ -403,6 +403,18 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.assertIn(token, self.source)
         self.assertIn("if f_bar_drawable(lastInvalidBar)", self.source)
 
+    def test_v4_c23_wave5_extension_has_instrument_gate(self):
+        for token in (
+            'instrumentType = input.string("Auto"',
+            'syminfo.type == "index"',
+            "allowIndexW5Extension",
+            "extensionStructure",
+            "extensionMarketAllowed",
+            '"W5_EXTENSION"',
+            '"W5_EXTENSION_INDEX_DISABLED"',
+        ):
+            self.assertIn(token, self.source)
+
     def test_wave5_is_archived_while_larger_correction_develops(self):
         self.assertIn("f_remove_history_cycle(cycleId)", self.source)
         self.assertIn(
@@ -410,6 +422,35 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.source,
         )
         self.assertIn("if not na(lockedABar)", self.source)
+
+    def test_gue_support_layer_is_confidence_only(self):
+        for token in (
+            "bbDirectionalExpansion",
+            "gmmaFast",
+            "gmmaSlow",
+            "volumeRatio",
+            "atrAverage",
+            '"BB_DIRECTIONAL_EXPANSION"',
+            '"GMMA_TREND_ALIGNED"',
+            '"VOLUME_HIGH"',
+            '"VOLUME_DRY_UP"',
+            '"VOLATILITY_DECREASE"',
+            "currentConfidence := math.min(100.0, currentConfidence + gueSupportCount * 5.0)",
+        ):
+            self.assertIn(token, self.source)
+
+    def test_searching_state_keeps_a_non_authoritative_structural_wave_map(self):
+        for token in (
+            'showSearchWaveMap = input.bool(true',
+            'candidateState == "SEARCHING"',
+            "completedCycleCount == 0",
+            "if barstate.islast and f_is_candidate_mode() and showSearchWaveMap",
+            "structuralAllSwings ? f_phase(i) : f_wave_phase(i)",
+            "f_redraw(true, true, false)",
+            "f_redraw(true, false, true)",
+            "context only; they do not change or override the authoritative candidate state",
+        ):
+            self.assertIn(token, self.source)
 
 
 if __name__ == "__main__":

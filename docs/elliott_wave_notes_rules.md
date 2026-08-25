@@ -134,10 +134,10 @@ main count.
 ## Milestone Boundary
 
 The source-locked Pine/Python lifecycle, including bounded historical cycles,
-is implemented and covered by deterministic local contracts. The
-instrument-specific Wave-5 extension conflict remains visibly blocked with
-`W5_EXTENSION_REQUIRES_INSTRUMENT_RULE`; the source explicitly forbids a
-universal rule. This is not final chart acceptance: TradingView compilation,
+is implemented and covered by deterministic local contracts. The C23
+instrument rule enables Wave-5 extensions for stocks, futures, forex,
+commodities, and crypto; indices remain disabled by default unless the advanced
+override is enabled. This is not final chart acceptance: TradingView compilation,
 XAUUSD 4H replay against the client references, candle-for-candle parity,
 performance, chart review, and backtesting remain required.
 

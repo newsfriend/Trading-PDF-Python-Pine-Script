@@ -108,6 +108,9 @@ class ElliottWaveConfig:
     flat_b_max_retrace: float = 1.11
     wave5_min_extension: float = 1.27
     wave5_max_extension: float = 2.618
+    instrument_type: str = "Commodity"
+    allow_index_w5_extension: bool = False
+    wave_equality_tolerance: float = 0.05
     wave5_divergence_mode: str = "Support"
     time_rule_mode: str = "Diagnostic all sources"
     hp_signal_mode: str = "Structure confirmation only"
@@ -404,6 +407,20 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
         )
     if cfg.wave5_divergence_mode not in {"Support", "Required", "Off"}:
         raise ValueError('wave5_divergence_mode must be "Support", "Required", or "Off"')
+    valid_instrument_types = {
+        "Stock",
+        "Futures",
+        "Forex",
+        "Commodity",
+        "Crypto",
+        "Index",
+    }
+    if cfg.instrument_type not in valid_instrument_types:
+        raise ValueError(
+            f"instrument_type must be one of {sorted(valid_instrument_types)}"
+        )
+    if not 0.0 <= cfg.wave_equality_tolerance <= 1.0:
+        raise ValueError("wave_equality_tolerance must be between 0 and 1")
     if cfg.time_rule_mode not in {
         "Diagnostic all sources",
         "Chartking",
@@ -647,6 +664,33 @@ def _with_indicators(
     enriched["_ew_macd_highest"] = enriched["_ew_macd_hist"] >= enriched["_ew_macd_hist"].rolling(
         cfg.oscillator_lookback, min_periods=1
     ).max()
+
+    # V4 GUE support layer. These values rank a hard-valid wave but never
+    # create a label or repair a failed structural/Fib/time gate.
+    bb_basis = close.rolling(20, min_periods=2).mean()
+    bb_deviation = close.rolling(20, min_periods=2).std(ddof=0) * 2.0
+    enriched["_ew_bb_basis"] = bb_basis
+    enriched["_ew_bb_upper"] = bb_basis + bb_deviation
+    enriched["_ew_bb_lower"] = bb_basis - bb_deviation
+    enriched["_ew_bb_width"] = 2.0 * bb_deviation
+    fast_gmma = pd.concat(
+        [_ema(close, length) for length in (3, 5, 8, 10, 12, 15)], axis=1
+    ).mean(axis=1)
+    slow_gmma = pd.concat(
+        [_ema(close, length) for length in (30, 35, 40, 45, 50, 60)], axis=1
+    ).mean(axis=1)
+    enriched["_ew_gmma_fast"] = fast_gmma
+    enriched["_ew_gmma_slow"] = slow_gmma
+    enriched["_ew_atr_average"] = enriched["_ew_atr"].rolling(
+        20, min_periods=1
+    ).mean()
+    if "volume" in enriched:
+        volume = pd.to_numeric(enriched["volume"], errors="coerce")
+        enriched["_ew_volume_ratio"] = volume / volume.rolling(
+            20, min_periods=1
+        ).mean().replace(0.0, np.nan)
+    else:
+        enriched["_ew_volume_ratio"] = np.nan
     return enriched
 
 
@@ -2184,25 +2228,43 @@ def _advance_impulse_state(
             else p5.price < p3.price and p5.macd_hist > p3.macd_hist
         )
         channel = _impulse_channel_evidence(
-            p2, p3, p4, p5, bullish, divergence, cfg
+            p2, p3, p4, p5, bullish, divergence, cfg, source=source
         )
         divergence_pass = (
             bool(ending_diagonal.get("divergence", False))
             if ending_confirmed
             else cfg.wave5_divergence_mode != "Required" or divergence
         )
-        normal = cfg.wave5_min_extension <= ratio <= cfg.wave5_max_extension
+        w1_duration = p1.position - p0.position
+        w3_duration = p3.position - p2.position
+        w4_duration = p4.position - p3.position
+        w5_duration = p5.position - p4.position
+        w1_w3_price_equal = _approximately_equal(
+            w1_length, w3_length, cfg.wave_equality_tolerance
+        )
+        w1_w3_time_equal = _approximately_equal(
+            float(w1_duration), float(w3_duration), cfg.wave_equality_tolerance
+        )
+        extension_structure = bool(
+            internal_count > 5
+            and (w1_w3_price_equal or w1_w3_time_equal)
+            and cfg.wave5_min_extension <= ratio <= cfg.wave5_max_extension
+        )
+        extension_market_allowed = bool(
+            cfg.instrument_type != "Index" or cfg.allow_index_w5_extension
+        )
+        extended = extension_structure and extension_market_allowed
+        normal = bool(
+            internal_count == 5
+            and cfg.wave5_min_extension <= ratio <= cfg.wave5_max_extension
+        )
         double_extension = (
             float(waves["1"]["internal_count"]) > 5
             and float(waves["3"]["internal_count"]) > 5
         )
-        truncated = double_extension and ratio <= 0.812
-        price_subtype_pass = normal or truncated or ending_confirmed
+        truncated = double_extension and internal_count == 5 and ratio <= 0.812
+        price_subtype_pass = normal or truncated or extended or ending_confirmed
         if internal_valid and not w3_shortest and divergence_pass and price_subtype_pass:
-            w1_duration = p1.position - p0.position
-            w3_duration = p3.position - p2.position
-            w4_duration = p4.position - p3.position
-            w5_duration = p5.position - p4.position
             time_targets = (
                 float(w1_duration),
                 float(w4_duration),
@@ -2243,6 +2305,8 @@ def _advance_impulse_state(
                 if ending_confirmed
                 else "W5_TRUNCATED"
                 if truncated
+                else "W5_EXTENSION"
+                if extended
                 else "W5_NORMAL"
             )
             pattern = "Ending Diagonal" if ending_confirmed else "Motive"
@@ -2298,16 +2362,16 @@ def _advance_impulse_state(
                 fbd_candidate=str(record["fbd_candidate"]),
                 support_evidence=str(record["support_evidence"]),
             )
-        extension_conflict = bool(
-            np.isfinite(ratio) and ratio > cfg.wave5_max_extension
-        )
+        extension_conflict = extension_structure and not extension_market_allowed
         reason = (
             "W5_W3_SHORTEST"
             if w3_shortest
             else "W5_INTERNAL_FAIL"
             if not internal_valid
-            else "W5_EXTENSION_REQUIRES_INSTRUMENT_RULE"
+            else "W5_EXTENSION_INDEX_DISABLED"
             if extension_conflict
+            else "W5_EXTENSION_PRICE_LIMIT"
+            if np.isfinite(ratio) and ratio > cfg.wave5_max_extension
             else "W5_PRICE_SUBTYPE_PENDING"
         )
         return _transition(
@@ -2317,6 +2381,8 @@ def _advance_impulse_state(
             subtype=(
                 "W5_EXTENSION_SOURCE_CONFLICT"
                 if extension_conflict
+                else "W5_EXTENSION_PRICE_LIMIT"
+                if np.isfinite(ratio) and ratio > cfg.wave5_max_extension
                 else "W5_CANDIDATE"
             ),
             reason_code=reason,
@@ -3769,6 +3835,7 @@ def _impulse_channel_evidence(
     bullish: bool,
     divergence: bool,
     cfg: ElliottWaveConfig,
+    source: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     """Evaluate the locked 2-4 channel, parallel-through-3 target and FBO clue."""
 
@@ -3794,6 +3861,9 @@ def _impulse_channel_evidence(
     confidence += 10.0 if divergence else 0.0
     confidence += 10.0 if cluster else 0.0
     confidence += 10.0 if channel_contact else 0.0
+    gue_evidence = _gue_support_evidence(source, p5.position, bullish)
+    confidence = min(100.0, confidence + 5.0 * len(gue_evidence))
+    channel_evidence = "CHANNEL_CONTACT" if channel_contact else "CHANNEL_PROJECTION"
     return {
         "channel_type": "IMPULSE_2_4_PARALLEL_3",
         "channel_target": channel_target,
@@ -3801,10 +3871,43 @@ def _impulse_channel_evidence(
         "target_cluster": "FIB_CHANNEL_CLUSTER" if cluster else "",
         "fbd_candidate": fbd_candidate,
         "confidence": confidence,
-        "support_evidence": (
-            "CHANNEL_CONTACT" if channel_contact else "CHANNEL_PROJECTION"
-        ),
+        "support_evidence": " | ".join((channel_evidence, *gue_evidence)),
     }
+
+
+def _gue_support_evidence(
+    source: pd.DataFrame | None, position: int, bullish: bool
+) -> tuple[str, ...]:
+    """Return non-authoritative BB/GMMA/volume/volatility evidence tokens."""
+
+    if source is None or position < 0 or position >= len(source):
+        return ()
+    row = source.iloc[position]
+    prior = source.iloc[max(0, position - 1)]
+    evidence: list[str] = []
+    width = float(row.get("_ew_bb_width", np.nan))
+    prior_width = float(prior.get("_ew_bb_width", np.nan))
+    basis = float(row.get("_ew_bb_basis", np.nan))
+    close = float(row.get("close", np.nan))
+    if np.isfinite(width) and np.isfinite(prior_width) and width > prior_width:
+        if np.isfinite(basis) and ((bullish and close >= basis) or (not bullish and close <= basis)):
+            evidence.append("BB_DIRECTIONAL_EXPANSION")
+    fast = float(row.get("_ew_gmma_fast", np.nan))
+    slow = float(row.get("_ew_gmma_slow", np.nan))
+    if np.isfinite(fast) and np.isfinite(slow):
+        if (bullish and fast > slow) or (not bullish and fast < slow):
+            evidence.append("GMMA_TREND_ALIGNED")
+    volume_ratio = float(row.get("_ew_volume_ratio", np.nan))
+    if np.isfinite(volume_ratio):
+        if volume_ratio >= 1.20:
+            evidence.append("VOLUME_HIGH")
+        elif volume_ratio < 0.80:
+            evidence.append("VOLUME_DRY_UP")
+    atr = float(row.get("_ew_atr", np.nan))
+    atr_average = float(row.get("_ew_atr_average", np.nan))
+    if np.isfinite(atr) and np.isfinite(atr_average) and atr < 0.80 * atr_average:
+        evidence.append("VOLATILITY_DECREASE")
+    return tuple(evidence)
 
 
 def _candidate_ending_at(
@@ -4487,6 +4590,15 @@ def _safe_ratio(numerator: float, denominator: float) -> float:
     if denominator == 0 or np.isnan(denominator):
         return np.nan
     return numerator / denominator
+
+
+def _approximately_equal(left: float, right: float, tolerance: float) -> bool:
+    """Return V4 equality using the larger magnitude as the stable anchor."""
+
+    scale = max(abs(left), abs(right))
+    if scale == 0:
+        return True
+    return abs(left - right) / scale <= tolerance
 
 
 def _ema(series: pd.Series, length: int) -> pd.Series:

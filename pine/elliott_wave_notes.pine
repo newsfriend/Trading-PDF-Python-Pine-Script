@@ -26,6 +26,7 @@ manualDegreeTimeframe = input.timeframe("D", "Manual Important H/L timeframe", g
 importantLookbackDays = input.int(144, "Important H/L source bars", minval=10, group=groupEngine, tooltip="Default uses 144 Daily source candles, not 144 local chart candles.")
 baseOscillatorMode = input.string("Extreme or divergence", "Base oscillator rule", options=["Extreme or divergence", "Extreme only", "Divergence only", "Extreme and divergence", "Off"], group=groupEngine)
 showDevelopingCandidates = input.bool(true, "Show developing/alternate status", group=groupEngine)
+showSearchWaveMap = input.bool(true, "Show structural wave map while searching", group=groupEngine, tooltip="Keeps the chart informative when no strict V4 Point 0 is active. These warning-colored historical paths are context only; they do not change or override the authoritative candidate state.")
 degreeSourceTimeframe = degreePreset == "Manual" ? manualDegreeTimeframe : degreePreset == "Hardik 1Y" ? "M" : "D"
 degreeName = degreePreset == "Hardik 1Y" ? "Primary" : degreePreset == "Hardik Swing" ? "Intermediate" : "Major"
 
@@ -72,6 +73,9 @@ flatBMinRetrace = input.float(61.8, "Flat B minimum retrace %", minval=0.0, step
 flatBMaxRetrace = input.float(111.0, "Flat B maximum retrace %", minval=1.0, step=0.1, group=groupRules) / 100.0
 wave5MinExtension = input.float(127.0, "Wave 5 minimum % of Wave 3-4", minval=1.0, step=0.1, group=groupRules) / 100.0
 wave5MaxExtension = input.float(261.8, "Wave 5 maximum % of Wave 3-4", minval=1.0, step=0.1, group=groupRules) / 100.0
+instrumentType = input.string("Auto", "Instrument type", options=["Auto", "Stock", "Futures", "Forex", "Commodity", "Crypto", "Index"], group=groupRules, tooltip="V4 C23 permits W5 extension for stocks, futures, forex, commodities and crypto. Indices are disabled unless the Advanced override is enabled.")
+allowIndexW5Extension = input.bool(false, "Advanced: allow index W5 extension", group=groupRules)
+waveEqualityTolerance = input.float(5.0, "W1/W3 equality tolerance %", minval=0.0, maxval=100.0, step=0.1, group=groupRules) / 100.0
 wave5DivergenceMode = input.string("Support", "Wave 5 divergence rule", options=["Support", "Required", "Off"], group=groupRules)
 timeRuleMode = input.string("Diagnostic all sources", "Time rule source", options=["Diagnostic all sources", "Chartking", "Hardik", "Separate Time Analysis"], group=groupRules)
 hpSignalMode = input.string("Structure confirmation only", "HP signal mode", options=["Structure confirmation only", "Disabled"], group=groupRules)
@@ -174,6 +178,7 @@ var string currentChannelState = ""
 var float currentChannelTarget = na
 var string currentTargetCluster = ""
 var string fbdCandidateState = ""
+var string currentGueSupportState = ""
 var int lockedW2Bar = na
 var float lockedW2Price = na
 var string lockedW2Pattern = ""
@@ -1378,7 +1383,7 @@ f_update_time_table() =>
             fibEvidence = str.length(currentFibAnchor) > 0 and not na(currentFibValue) ? currentFibAnchor + " " + str.tostring(currentFibValue * 100.0, "#.##") + "%" : "waiting"
             patternEvidence = str.length(alternatePattern) > 0 ? primaryPattern + " | alt " + alternatePattern : primaryPattern
             routedConfidence = not na(currentConfidence) ? math.min(100.0, currentConfidence + routeConfidenceBonus) : na
-            supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "") + (str.length(currentChannelState) > 0 ? " | " + currentChannelState : "") + (str.length(currentTargetCluster) > 0 ? " | " + currentTargetCluster : "") + (str.length(fbdCandidateState) > 0 ? " | " + fbdCandidateState : "") + (not na(routedConfidence) ? " | confidence " + str.tostring(routedConfidence, "#") : "")
+            supportEvidence = (not na(currentTimeValue) ? " | time x" + str.tostring(currentTimeValue, "#.##") : "") + (str.length(currentMacdState) > 0 ? " | " + currentMacdState : "") + (str.length(currentGueSupportState) > 0 ? " | " + currentGueSupportState : "") + (str.length(hpSignalState) > 0 ? " | " + hpSignalState : "") + (str.length(currentChannelState) > 0 ? " | " + currentChannelState : "") + (str.length(currentTargetCluster) > 0 ? " | " + currentTargetCluster : "") + (str.length(fbdCandidateState) > 0 ? " | " + fbdCandidateState : "") + (not na(routedConfidence) ? " | confidence " + str.tostring(routedConfidence, "#") : "")
             table.cell(timeTable, 0, 0, engineMode == "Candidate State (V4 Full Cycle)" ? "EW V4" : "EW Phase 1", text_color=color.white, bgcolor=dashboardHeaderColor)
             table.cell(timeTable, 1, 0, candidateState, text_color=color.white, bgcolor=stateColor)
             table.cell(timeTable, 0, 1, "Degree", text_color=color.white, bgcolor=dashboardBodyColor)
@@ -1673,21 +1678,23 @@ f_redraw_candidate() =>
         invalidLabel = label.new(lastInvalidBar, lastInvalidPrice, text="INVALID\nrecount " + str.tostring(recountCount), style=label.style_label_down, yloc=yloc.price, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny, tooltip=lastInvalidReason, force_overlay=true)
         array.push(drawnLabels, invalidLabel)
 
-f_redraw() =>
-    f_clear_drawings()
+f_redraw(clearFirst, showGuides, structuralAllSwings) =>
+    if clearFirst
+        f_clear_drawings()
     count = array.size(swingBars)
     if count > 0
         latestAnchor = f_valid_anchor_index(count - 1)
-        f_draw_anchor_fib(latestAnchor)
+        if showGuides
+            f_draw_anchor_fib(latestAnchor)
         for i = 0 to count - 1
             b = array.get(swingBars, i)
             p = array.get(swingPrices, i)
             t = array.get(swingTypes, i)
-            phase = f_wave_phase(i)
+            phase = structuralAllSwings ? f_phase(i) : f_wave_phase(i)
             cycleStart = phase >= 0 ? i - phase : -1
             if phase >= 0
                 if i > 0
-                    prevPhase = f_wave_phase(i - 1)
+                    prevPhase = structuralAllSwings ? f_phase(i - 1) : f_wave_phase(i - 1)
                     prevCycleStart = prevPhase >= 0 ? (i - 1) - prevPhase : -1
                     if prevPhase >= 0 and prevCycleStart == cycleStart
                         prevBar = array.get(swingBars, i - 1)
@@ -1701,7 +1708,7 @@ f_redraw() =>
                     style = t == 1 ? label.style_label_down : label.style_label_up
                     lbl = label.new(b, p, text=f_phase_text(phase), style=style, yloc=yloc.price, color=f_label_color(phase, hardInvalid, softWarn), textcolor=labelTextColor, size=f_label_size(), tooltip=note, force_overlay=true)
                     array.push(drawnLabels, lbl)
-                if phase == f_wave4_complete_phase()
+                if showGuides and phase == f_wave4_complete_phase()
                     f_draw_wave5_targets(cycleStart)
 pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
 pivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
@@ -1711,6 +1718,14 @@ rsiValue = ta.rsi(close, rsiLength)
 macdLine = ta.ema(close, macdFast) - ta.ema(close, macdSlow)
 macdSignalLine = ta.ema(macdLine, macdSignal)
 macdHist = macdLine - macdSignalLine
+bbBasis = ta.sma(close, 20)
+bbDeviation = 2.0 * ta.stdev(close, 20)
+bbWidth = 2.0 * bbDeviation
+bbDirectionalExpansion = bbWidth > bbWidth[1]
+gmmaFast = (ta.ema(close, 3) + ta.ema(close, 5) + ta.ema(close, 8) + ta.ema(close, 10) + ta.ema(close, 12) + ta.ema(close, 15)) / 6.0
+gmmaSlow = (ta.ema(close, 30) + ta.ema(close, 35) + ta.ema(close, 40) + ta.ema(close, 45) + ta.ema(close, 50) + ta.ema(close, 60)) / 6.0
+volumeRatio = na(volume) ? na : volume / ta.sma(volume, 20)
+atrAverage = ta.sma(atrValue, 20)
 pivotAtr = atrValue[pivotRight]
 pivotRsi = rsiValue[pivotRight]
 pivotMacdHist = macdHist[pivotRight]
@@ -1863,6 +1878,7 @@ if originBroken or retentionInvalidated or baseOutsideDegreeWindow
     currentInternalPattern := ""
     currentInternalCount := 0
     currentMacdState := ""
+    currentGueSupportState := ""
     currentNextCondition := "Need qualified Point 0 and Wave 1"
     hpSignalState := ""
     lockedW2Bar := na
@@ -1972,6 +1988,7 @@ if changed
             currentInternalPattern := ""
             currentInternalCount := 0
             currentMacdState := ""
+            currentGueSupportState := ""
             currentNextCondition := "Need qualified Point 0 and Wave 1"
             hpSignalState := ""
             currentConfidence := na
@@ -2289,13 +2306,19 @@ if changed
                         latestMacd = array.get(swingMacdHist, latestIndex)
                         divergence = lockedBullish ? latestPrice > lockedW3Price and latestMacd < lockedW3Macd : latestPrice < lockedW3Price and latestMacd > lockedW3Macd
                         divergencePass = endingConfirmed ? endingDivergence : wave5DivergenceMode != "Required" or divergence
-                        normal = not na(projection) and projection >= wave5MinExtension and projection <= wave5MaxExtension
-                        doubleExtension = lockedInternalCount > 5 and lockedW3InternalCount > 5
-                        truncated = doubleExtension and not na(projection) and projection <= 0.812
                         w1Duration = math.max(1, lockedW1Bar - lockedBaseBar)
                         w3Duration = math.max(1, lockedW3Bar - lockedW2Bar)
                         w4Duration = math.max(1, lockedW4Bar - lockedW3Bar)
                         w5Duration = math.max(1, latestBar - lockedW4Bar)
+                        w1W3PriceEqual = math.abs(w1Length - w3Length) / math.max(w1Length, w3Length) <= waveEqualityTolerance
+                        w1W3TimeEqual = math.abs(w1Duration - w3Duration) / math.max(w1Duration, w3Duration) <= waveEqualityTolerance
+                        instrumentIsIndex = instrumentType == "Index" or (instrumentType == "Auto" and syminfo.type == "index")
+                        extensionMarketAllowed = not instrumentIsIndex or allowIndexW5Extension
+                        extensionStructure = internalCount > 5 and (w1W3PriceEqual or w1W3TimeEqual) and not na(projection) and projection >= wave5MinExtension and projection <= wave5MaxExtension
+                        extended = extensionStructure and extensionMarketAllowed
+                        normal = internalCount == 5 and not na(projection) and projection >= wave5MinExtension and projection <= wave5MaxExtension
+                        doubleExtension = lockedInternalCount > 5 and lockedW3InternalCount > 5
+                        truncated = doubleExtension and internalCount == 5 and not na(projection) and projection <= 0.812
                         timePass = f_w5_time_pass(w1Duration, w3Duration, w4Duration, w5Duration)
                         channelSlope = f_ratio(lockedW4Price - lockedW2Price, math.max(1, lockedW4Bar - lockedW2Bar))
                         channelTarget = lockedW3Price + channelSlope * (latestBar - lockedW3Bar)
@@ -2315,11 +2338,25 @@ if changed
                         currentInternalPattern := endingConfirmed ? endingPattern : "Impulse candidate " + str.tostring(internalCount) + " moves"
                         currentInternalCount := internalCount
                         currentMacdState := divergence ? "W3/W5 DIVERGENCE PASS" : "W3/W5 DIVERGENCE ABSENT"
+                        gueBb = bbDirectionalExpansion[pivotRight] and ((lockedBullish and close[pivotRight] >= bbBasis[pivotRight]) or (not lockedBullish and close[pivotRight] <= bbBasis[pivotRight]))
+                        gueGmma = (lockedBullish and gmmaFast[pivotRight] > gmmaSlow[pivotRight]) or (not lockedBullish and gmmaFast[pivotRight] < gmmaSlow[pivotRight])
+                        gueVolumeHigh = not na(volumeRatio[pivotRight]) and volumeRatio[pivotRight] >= 1.20
+                        gueVolumeDry = not na(volumeRatio[pivotRight]) and volumeRatio[pivotRight] < 0.80
+                        gueVolatilityLow = not na(atrAverage[pivotRight]) and atrValue[pivotRight] < 0.80 * atrAverage[pivotRight]
+                        gueSupport = ""
+                        gueSupport := gueBb ? "BB_DIRECTIONAL_EXPANSION" : gueSupport
+                        gueSupport := gueGmma ? gueSupport + (str.length(gueSupport) > 0 ? " | " : "") + "GMMA_TREND_ALIGNED" : gueSupport
+                        gueSupport := gueVolumeHigh ? gueSupport + (str.length(gueSupport) > 0 ? " | " : "") + "VOLUME_HIGH" : gueSupport
+                        gueSupport := gueVolumeDry ? gueSupport + (str.length(gueSupport) > 0 ? " | " : "") + "VOLUME_DRY_UP" : gueSupport
+                        gueSupport := gueVolatilityLow ? gueSupport + (str.length(gueSupport) > 0 ? " | " : "") + "VOLATILITY_DECREASE" : gueSupport
+                        currentGueSupportState := gueSupport
+                        gueSupportCount = (gueBb ? 1 : 0) + (gueGmma ? 1 : 0) + (gueVolumeHigh or gueVolumeDry ? 1 : 0) + (gueVolatilityLow ? 1 : 0)
+                        currentConfidence := math.min(100.0, currentConfidence + gueSupportCount * 5.0)
                         primaryPattern := endingConfirmed ? "Ending Diagonal" : "Motive"
-                        if internalValid and not w3Shortest and divergencePass and (normal or truncated or endingConfirmed) and timePass
+                        if internalValid and not w3Shortest and divergencePass and (normal or truncated or extended or endingConfirmed) and timePass
                             lockedW5Bar := latestBar
                             lockedW5Price := latestPrice
-                            lockedW5Subtype := endingConfirmed ? "W5_" + endingSubtype : truncated ? "W5_TRUNCATED" : "W5_NORMAL"
+                            lockedW5Subtype := endingConfirmed ? "W5_" + endingSubtype : truncated ? "W5_TRUNCATED" : extended ? "W5_EXTENSION" : "W5_NORMAL"
                             lockedW5Ratio := projection
                             currentTimeValue := f_ratio(math.max(1, latestBar - lockedW4Bar), math.max(1, lockedW1Bar - lockedBaseBar))
                             engineStage := "LARGER_CORRECTION_CONTAINER"
@@ -2332,7 +2369,7 @@ if changed
                             transitionConfirmed := true
                         else
                             candidateState := w3Shortest ? "INVALID" : "FORMING"
-                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? (internalCount == 15 ? endingReason : "W5_INTERNAL_FAIL") : (normal or truncated or endingConfirmed) and not timePass ? "W5_TIME_GATE_FAIL" : projection > wave5MaxExtension ? "W5_EXTENSION_REQUIRES_INSTRUMENT_RULE" : "W5_PRICE_SUBTYPE_PENDING"
+                            lastReasonCode := w3Shortest ? "W5_W3_SHORTEST" : not internalValid ? (internalCount == 15 ? endingReason : "W5_INTERNAL_FAIL") : extensionStructure and not extensionMarketAllowed ? "W5_EXTENSION_INDEX_DISABLED" : (normal or truncated or extended or endingConfirmed) and not timePass ? "W5_TIME_GATE_FAIL" : projection > wave5MaxExtension ? "W5_EXTENSION_PRICE_LIMIT" : "W5_PRICE_SUBTYPE_PENDING"
                             currentNextCondition := not timePass ? "Need a permitted V4 Wave 5 time window." : "Need a valid normal/truncated/extended/ED subtype and deferred W3-shortest check."
                             developingText := correctSide ? "5?" : "raw"
                     else
@@ -2475,7 +2512,13 @@ if changed
                 developingText := ""
         f_redraw_candidate()
     else
-        f_redraw()
+        f_redraw(true, true, false)
+
+// SEARCHING can be reached on a closed bar that did not create a new pivot.
+// Refresh the contextual map on the last bar as well so the overlay never
+// remains blank merely because the final lifecycle transition was pivot-free.
+if barstate.islast and f_is_candidate_mode() and showSearchWaveMap and candidateState == "SEARCHING" and completedCycleCount == 0
+    f_redraw(true, false, true)
 
 degreeDashboardVisible = dashboardMode != "Hidden" and showDegreeDashboard
 if degreeDashboardVisible and barstate.islast

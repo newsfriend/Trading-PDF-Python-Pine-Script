@@ -18,11 +18,37 @@ from python.elliott_wave_notes import (
     _evaluate_double_correction,
     _evaluate_diagonal,
     _impulse_channel_evidence,
+    _gue_support_evidence,
     _evaluate_simple_correction,
     _evaluate_triple_correction,
     _evaluate_triangle_correction,
     _with_indicators,
 )
+
+
+class GueSupportEvidenceTests(unittest.TestCase):
+    def test_support_layer_reports_all_non_authoritative_evidence(self):
+        source = pd.DataFrame(
+            {
+                "close": [100.0, 110.0],
+                "_ew_bb_width": [10.0, 12.0],
+                "_ew_bb_basis": [100.0, 100.0],
+                "_ew_gmma_fast": [100.0, 105.0],
+                "_ew_gmma_slow": [100.0, 100.0],
+                "_ew_volume_ratio": [1.0, 1.25],
+                "_ew_atr": [1.0, 0.7],
+                "_ew_atr_average": [1.0, 1.0],
+            }
+        )
+        self.assertEqual(
+            _gue_support_evidence(source, 1, True),
+            (
+                "BB_DIRECTIONAL_EXPANSION",
+                "GMMA_TREND_ALIGNED",
+                "VOLUME_HIGH",
+                "VOLATILITY_DECREASE",
+            ),
+        )
 
 
 def _swing(
@@ -1193,14 +1219,34 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(state["active"]["waves"]["3"]["internal_count"], 9)
         self.assertEqual(state["active"]["waves"]["5"]["subtype"], "W5_TRUNCATED")
 
-    def test_v4_instrument_specific_w5_extension_is_explicitly_blocked(self):
-        state = _run_candidate_state(
-            _through_w5(), replace(self.config, wave5_max_extension=1.50)
+    def test_v4_commodity_w5_extension_is_confirmed(self):
+        swings = _through_w4()
+        _append_prices(
+            swings,
+            [120, 110, 130, 115, 140, 120, 150, 130, 167.5],
+            final_macd=5,
         )
+        state = _run_candidate_state(swings, self.config)
+
+        self.assertEqual(
+            state["active"]["waves"]["5"]["subtype"], "W5_EXTENSION"
+        )
+
+    def test_v4_index_w5_extension_is_disabled_without_override(self):
+        swings = _through_w4()
+        _append_prices(
+            swings,
+            [120, 110, 130, 115, 140, 120, 150, 130, 167.5],
+            final_macd=5,
+        )
+        state = _run_candidate_state(
+            swings, replace(self.config, instrument_type="Index")
+        )
+
         self.assertEqual(state["active"]["parent_state"], "W5_FORMING")
         self.assertEqual(
             state["last_reason_code"],
-            "W5_EXTENSION_REQUIRES_INSTRUMENT_RULE",
+            "W5_EXTENSION_INDEX_DISABLED",
         )
 
     def test_public_api_exports_raw_main_and_lifecycle_fields(self):
