@@ -442,6 +442,7 @@ class ElliottWavePineContractTests(unittest.TestCase):
     def test_client_gue_overlay_exposes_right_scale_values(self):
         for token in (
             'showGueOverlay = input.bool(true',
+            'showGueBandFill = input.bool(true',
             '"BB Upper 20/2"',
             '"EMA 13"',
             '"EMA 26"',
@@ -449,6 +450,7 @@ class ElliottWavePineContractTests(unittest.TestCase):
             '"EMA 60"',
             '"EMA 100"',
             '"BB Lower 20/2"',
+            'title="BB Light Blue Fill"',
         ):
             self.assertIn(token, self.source)
 
@@ -461,8 +463,9 @@ class ElliottWavePineContractTests(unittest.TestCase):
             "completedCycleCount == 0",
             "if barstate.islast and f_is_candidate_mode() and showSearchWaveMap",
             "structuralAllSwings ? f_phase(i) : f_wave_phase(i)",
-            "f_redraw(true, true, false)",
-            "f_redraw(true, false, true)",
+            "f_latest_context_anchor_index",
+            "f_redraw(true, true, true, false)",
+            "f_redraw(true, true, false, true)",
             "context only; they do not change or override the authoritative candidate state",
         ):
             self.assertIn(token, self.source)

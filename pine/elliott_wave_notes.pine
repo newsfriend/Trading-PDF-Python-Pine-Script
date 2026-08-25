@@ -91,6 +91,7 @@ countDisplayMode = input.string("Validated Anchor", "Count mode", options=["Vali
 showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
 showAnchorFib = input.bool(true, "Show Important H/L fib guide", group=groupDisplay)
 showGueOverlay = input.bool(true, "Show BB + EMA support overlay", group=groupDisplay, tooltip="Client-reference overlay: Bollinger 20/2 plus EMA 13, 26, 50, 60 and 100. Visible plots also expose their live colored values on the right price scale.")
+showGueBandFill = input.bool(true, "Show light-blue Bollinger fill", group=groupDisplay)
 dashboardMode = input.string("Hidden", "Dashboard", options=["Compact", "Full", "Hidden"], group=groupDisplay, tooltip="Hidden is the client-reference visual default. Full preserves the nine-route diagnostics; Compact shows only the active route and its neighbors.")
 showTimeTable = input.bool(true, "Show state/evidence table", group=groupDisplay)
 showDegreeDashboard = input.bool(true, "Show degree router", group=groupDisplay)
@@ -1131,6 +1132,14 @@ f_valid_anchor_index(index) =>
                 anchor := j
     anchor
 
+f_latest_context_anchor_index(index) =>
+    anchor = index >= 0 ? 0 : -1
+    if index >= 0
+        for j = 0 to index
+            if array.get(swingDegreeSignificant, j) or array.get(swingImportantExtreme, j)
+                anchor := j
+    anchor
+
 f_wave_phase(index) =>
     if countDisplayMode == "All swings"
         f_phase(index)
@@ -1679,13 +1688,13 @@ f_redraw_candidate() =>
         invalidLabel = label.new(lastInvalidBar, lastInvalidPrice, text="INVALID\nrecount " + str.tostring(recountCount), style=label.style_label_down, yloc=yloc.price, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny, tooltip=lastInvalidReason, force_overlay=true)
         array.push(drawnLabels, invalidLabel)
 
-f_redraw(clearFirst, showGuides, structuralAllSwings) =>
+f_redraw(clearFirst, showFibGuides, showWaveTargets, structuralAllSwings) =>
     if clearFirst
         f_clear_drawings()
     count = array.size(swingBars)
     if count > 0
-        latestAnchor = f_valid_anchor_index(count - 1)
-        if showGuides
+        latestAnchor = structuralAllSwings ? f_latest_context_anchor_index(count - 1) : f_valid_anchor_index(count - 1)
+        if showFibGuides
             f_draw_anchor_fib(latestAnchor)
         for i = 0 to count - 1
             b = array.get(swingBars, i)
@@ -1709,7 +1718,7 @@ f_redraw(clearFirst, showGuides, structuralAllSwings) =>
                     style = t == 1 ? label.style_label_down : label.style_label_up
                     lbl = label.new(b, p, text=f_phase_text(phase), style=style, yloc=yloc.price, color=f_label_color(phase, hardInvalid, softWarn), textcolor=labelTextColor, size=f_label_size(), tooltip=note, force_overlay=true)
                     array.push(drawnLabels, lbl)
-                if showGuides and phase == f_wave4_complete_phase()
+                if showWaveTargets and phase == f_wave4_complete_phase()
                     f_draw_wave5_targets(cycleStart)
 pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
 pivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
@@ -2520,13 +2529,13 @@ if changed
                 developingText := ""
         f_redraw_candidate()
     else
-        f_redraw(true, true, false)
+        f_redraw(true, true, true, false)
 
 // SEARCHING can be reached on a closed bar that did not create a new pivot.
 // Refresh the contextual map on the last bar as well so the overlay never
 // remains blank merely because the final lifecycle transition was pivot-free.
 if barstate.islast and f_is_candidate_mode() and showSearchWaveMap and candidateState == "SEARCHING" and completedCycleCount == 0
-    f_redraw(true, false, true)
+    f_redraw(true, true, false, true)
 
 degreeDashboardVisible = dashboardMode != "Hidden" and showDegreeDashboard
 if degreeDashboardVisible and barstate.islast
@@ -2595,10 +2604,11 @@ plot(not na(currentConfidence) ? math.min(100.0, currentConfidence + routeConfid
 
 // Client-reference GUE overlay. Normal visible plots intentionally expose a
 // colored last value on TradingView's right price scale.
-plot(showGueOverlay ? bbUpper : na, "BB Upper 20/2", color=color.rgb(36, 42, 52), linewidth=1)
+bbUpperPlot = plot(showGueOverlay ? bbUpper : na, "BB Upper 20/2", color=color.rgb(36, 42, 52), linewidth=1)
+bbLowerPlot = plot(showGueOverlay ? bbLower : na, "BB Lower 20/2", color=color.rgb(36, 42, 52), linewidth=1)
+fill(bbUpperPlot, bbLowerPlot, color=showGueOverlay and showGueBandFill ? color.new(color.rgb(181, 218, 235), 86) : na, title="BB Light Blue Fill")
 plot(showGueOverlay ? gueEma13 : na, "EMA 13", color=color.rgb(236, 49, 101), linewidth=2)
 plot(showGueOverlay ? gueEma26 : na, "EMA 26", color=color.rgb(77, 179, 102), linewidth=1)
 plot(showGueOverlay ? gueEma50 : na, "EMA 50", color=color.rgb(255, 128, 0), linewidth=1)
 plot(showGueOverlay ? gueEma60 : na, "EMA 60", color=color.rgb(245, 145, 31), linewidth=1)
 plot(showGueOverlay ? gueEma100 : na, "EMA 100", color=color.rgb(220, 39, 95), linewidth=2)
-plot(showGueOverlay ? bbLower : na, "BB Lower 20/2", color=color.rgb(36, 42, 52), linewidth=1)
