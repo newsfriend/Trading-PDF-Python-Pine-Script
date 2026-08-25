@@ -390,6 +390,19 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertNotIn('f_eval_diagonal(w2Index, latestIndex, "leading")', self.source)
         self.assertNotIn('f_eval_diagonal(w3Index, latestIndex, "ending")', self.source)
 
+    def test_live_rendering_releases_undrawable_or_evicted_active_counts(self):
+        for token in (
+            "f_bar_drawable(candidateBar)",
+            "candidateBar >= bar_index - 4999",
+            "retentionInvalidated",
+            '"ACTIVE_ENDPOINT_EVICTED"',
+            "baseOutsideDegreeWindow",
+            '"ACTIVE_DEGREE_WINDOW_EXPIRED"',
+            "bar_index - lockedBaseBar > degreeWindowChartBars",
+        ):
+            self.assertIn(token, self.source)
+        self.assertIn("if f_bar_drawable(lastInvalidBar)", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

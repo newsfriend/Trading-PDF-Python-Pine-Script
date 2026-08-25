@@ -43,7 +43,7 @@ The older manuals and chart images remain supporting references.
 | Wave 5 normal/truncated/ED classifier | DONE IN CODE | Normal, double-extension truncated, and ending-diagonal paths include time, divergence, W3-not-shortest, channel/cluster, and FBD/FBO support. The source-conflicted instrument-specific W5 extension is explicitly blocked with `W5_EXTENSION_REQUIRES_INSTRUMENT_RULE`; it is never generalized. |
 | Persistent confirmed labels 0-5 | DONE for supported core paths | Pine and Python lock each main wave only after its parent-state rules pass; later raw pivots remain developing candidates. |
 | Retain completed historical cycles | DONE IN CODE | The current forming count and latest three completed cycles are rendered independently. A locked terminal correction can seed the next Point 0, and archive-prefix regression tests prevent later pivots from moving completed endpoints. |
-| Phase 2 regression cases T02-T13 | DONE in Python | Tests cover normal/microscopic W2, Flat B at/above 111%, trending/terminal/extended W3, W4 completion/overlap gating, and normal/truncated W5. Pine has matching static contract tests; TradingView compilation is still required. |
+| Phase 2 regression cases T02-T13 | DONE in Python | Tests cover normal/microscopic W2, Flat B at/above 111%, trending/terminal/extended W3, W4 completion/overlap gating, and normal/truncated W5. Pine has matching static contract tests and compiles in TradingView; reference-range replay still remains. |
 
 ## Remaining Modules
 
@@ -59,7 +59,7 @@ The older manuals and chart images remain supporting references.
 | Double-confirmation outcome | DONE in code | After Y completes, both engines require the first closed 0-X break or >=38.2% WXY retracement within Y duration; otherwise the Double remains FORMING. TradingView replay evidence remains an acceptance item. |
 | Pine/Python candle-for-candle parity | READY FOR LIVE EVIDENCE | Python exposes pivot-confirmation events separately from historical label placement. Pine exports hidden state/parent/label/cycle/recount and locked endpoint series, and `python/elliott_wave_parity.py` produces a mismatch report from TradingView CSV data using confirmed Daily source context. The XAUUSD 4H export must still be captured and pass. |
 | Backtesting acceptance | MILESTONE 3 | Requires client-approved symbols, periods, expected counts, and acceptance thresholds. |
-| TradingView compile, replay and performance evidence | MILESTONE 3 | Local source contracts pass; Pine v6 compilation and chart behavior must be verified in TradingView. |
+| TradingView compile, replay and performance evidence | PARTIAL LIVE EVIDENCE | Pine v6 compilation and initial XAUUSD 4H runtime verification passed on 2026-08-25. Strict V4 correctly released a stale out-of-degree count and returned to `SEARCHING_FOR_BASE`. Reference-range replay, visual endpoint approval, CSV parity and performance evidence remain required. |
 
 ## V4 Conflict Resolution Migration
 
@@ -82,5 +82,19 @@ python -m unittest tests.test_elliott_wave_pine_contract -v
 ```
 
 Those commands verify the deterministic local contracts. Pine Editor
-compilation, XAUUSD 4H chart replay against the supplied references,
+compilation and an initial XAUUSD 4H runtime check passed on 2026-08-25.
+Full replay against the supplied references, visual endpoint approval,
 performance, candle parity, and backtesting are still required for acceptance.
+
+## 2026-08-25 Live TradingView Finding
+
+The prior dense screenshot-like output was reproduced only with `Legacy fixed
+cycle` and `All swings`. That mode numbers retained pivots mechanically and is
+not evidence that the V4 parent-wave rules passed. In strict Candidate State
+mode, the live chart exposed two platform-only failures (an undeclared drawing
+endpoint and attempts to draw beyond TradingView's bar-index limit) plus a stale
+Point-0 lifecycle. The source now guards undrawable history and releases an
+active count when its endpoint is evicted or Point 0 leaves the configured
+degree context. The corrected script compiled and ran without an error, then
+reported `SEARCHING_FOR_BASE` because no current candidate passed all mandatory
+V4 gates. This is a valid diagnostic state, not final visual acceptance.

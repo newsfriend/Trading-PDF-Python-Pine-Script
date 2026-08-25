@@ -7,6 +7,7 @@ from python.elliott_wave_notes import (
     ElliottWaveConfig,
     ELLIOTT_DEGREE_ROUTES,
     _Swing,
+    _active_degree_window_floor,
     compute_elliott_waves,
     compute_elliott_waves_multi_degree,
     _run_candidate_state,
@@ -268,6 +269,30 @@ def _mirror_bearish(swings):
 class ElliottWaveCandidateStateTests(unittest.TestCase):
     def setUp(self):
         self.config = ElliottWaveConfig(important_context_mode="Legacy bars")
+
+    def test_active_point0_expires_outside_calendar_degree_context(self):
+        source = pd.DataFrame(
+            {"close": range(200)},
+            index=pd.date_range("2025-01-01", periods=200, freq="D"),
+        )
+        swings = [_swing(0, 10.0, -1)]
+        config = replace(
+            self.config,
+            important_context_mode="Calendar days",
+            important_lookback_days=144,
+        )
+
+        self.assertIsNone(
+            _active_degree_window_floor(
+                {"start_idx": 0}, swings, 144, config, source
+            )
+        )
+        self.assertEqual(
+            _active_degree_window_floor(
+                {"start_idx": 0}, swings, 150, config, source
+            ),
+            6,
+        )
 
     def test_t01_qualified_base_locks_after_five_move_wave1(self):
         state = _run_candidate_state(_confirmed_wave1(), self.config)

@@ -1227,6 +1227,40 @@ def _run_candidate_state(
             search_floor = swings[terminal_idx].position
             active = None
 
+        if active is not None:
+            degree_floor = _active_degree_window_floor(
+                active, swings, swing.confirmed_position, cfg, source
+            )
+            if degree_floor is not None:
+                recount_count += 1
+                last_reason_code = "ACTIVE_DEGREE_WINDOW_EXPIRED"
+                events.append(
+                    {
+                        "index": swing.confirmed_index,
+                        "confirmed_index": swing.confirmed_index,
+                        "cycle_id": int(active["cycle_id"]),
+                        "values": {
+                            "ew_engine_state": "INVALID",
+                            "ew_rule_state": "invalid",
+                            "ew_rule_note": (
+                                "Point 0 left the configured Important H/L "
+                                "context; release the stale degree count."
+                            ),
+                            "ew_reason_code": last_reason_code,
+                            "ew_recount_reason": last_reason_code,
+                            "ew_next_condition": (
+                                "Search for a qualified Point 0 inside the "
+                                "current degree window."
+                            ),
+                            "ew_recount_count": recount_count,
+                            "ew_base_locked": False,
+                            **_empty_locked_wave_event_values(),
+                        },
+                    }
+                )
+                search_floor = degree_floor
+                active = None
+
         if active is not None and _origin_protection_active(str(active["parent_state"])):
             break_position = _origin_break_position(
                 source,
@@ -1621,6 +1655,32 @@ def _origin_protection_active(parent_state: str) -> bool:
         "W4_CORRECTION_CONTAINER",
         "W5_FORMING",
     }
+
+
+def _active_degree_window_floor(
+    active: dict[str, object],
+    swings: list[_Swing],
+    through_position: int,
+    cfg: ElliottWaveConfig,
+    source: pd.DataFrame | None,
+) -> int | None:
+    """Return a new search floor when Point 0 leaves its degree context."""
+
+    base_position = swings[int(active["start_idx"])].position
+    if cfg.important_context_mode == "Calendar days" and source is not None:
+        if not isinstance(source.index, pd.DatetimeIndex):
+            return None
+        current_position = min(through_position, len(source) - 1)
+        current_time = source.index[current_position]
+        base_time = source.index[base_position]
+        window = pd.Timedelta(days=cfg.important_lookback_days)
+        if current_time - base_time <= window:
+            return None
+        return int(source.index.searchsorted(current_time - window, side="left"))
+
+    if through_position - base_position <= cfg.important_lookback_days:
+        return None
+    return max(0, through_position - cfg.important_lookback_days)
 
 
 def _larger_correction_candidate_label(move_count: int, cfg: ElliottWaveConfig) -> str:

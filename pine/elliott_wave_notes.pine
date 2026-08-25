@@ -155,6 +155,7 @@ var int recountCount = 0
 var int alternateBaseCount = 0
 var int lastInvalidBar = na
 var float lastInvalidPrice = na
+var string lastInvalidReason = ""
 var string developingText = ""
 var string engineStage = "SEARCHING"
 var string primaryPattern = ""
@@ -380,6 +381,7 @@ f_candidate_for_count(endIndex, internalCount) =>
     candidateRank = -1
     if startIndex >= 0
         startBar = array.get(swingBars, startIndex)
+        endBar = array.get(swingBars, endIndex)
         startPrice = array.get(swingPrices, startIndex)
         endPrice = array.get(swingPrices, endIndex)
         startType = array.get(swingTypes, startIndex)
@@ -1144,6 +1146,7 @@ f_passes_degree_filter(pivotPrice, lastPrice, pivotAtr, pivotImportantRange) =>
 
 f_upsert_swing(pivotBar, pivotPrice, pivotType, pivotAtr, pivotMacdHist, pivotRsi, pivotMacdExtreme, pivotImportantExtreme, pivotImportantRange, pivotImportantHigh, pivotImportantLow, pivotImportantHighBar, pivotImportantLowBar) =>
     changed = false
+    retentionInvalidated = false
     count = array.size(swingBars)
     if count == 0
         array.push(swingBars, pivotBar)
@@ -1203,6 +1206,9 @@ f_upsert_swing(pivotBar, pivotPrice, pivotType, pivotAtr, pivotMacdHist, pivotRs
             array.push(swingImportantHighBar, pivotImportantHighBar)
             array.push(swingImportantLowBar, pivotImportantLowBar)
             while array.size(swingBars) > maxSwings
+                oldestBar = array.first(swingBars)
+                lockedEndpointEvicted = baseLocked and (oldestBar == lockedBaseBar or oldestBar == lockedW1Bar or oldestBar == lockedW2Bar or oldestBar == lockedW3Bar or oldestBar == lockedW4Bar or oldestBar == lockedW5Bar or oldestBar == lockedABar or oldestBar == lockedBBar or oldestBar == lockedCBar or oldestBar == lockedDBar or oldestBar == lockedEBar)
+                retentionInvalidated := retentionInvalidated or lockedEndpointEvicted
                 array.shift(swingBars)
                 array.shift(swingPrices)
                 array.shift(swingTypes)
@@ -1218,7 +1224,7 @@ f_upsert_swing(pivotBar, pivotPrice, pivotType, pivotAtr, pivotMacdHist, pivotRs
                 array.shift(swingImportantHighBar)
                 array.shift(swingImportantLowBar)
             changed := true
-    changed
+    [changed, retentionInvalidated]
 f_rule_state(index, phase) =>
     hardInvalid = false
     softWarn = false
@@ -1420,6 +1426,12 @@ f_fib_ratio(index) =>
 f_fib_text(index) =>
     index == 0 ? "0.00%" : index == 1 ? "14.00%" : index == 2 ? "23.60%" : index == 3 ? "38.20%" : index == 4 ? "50.00%" : index == 5 ? "61.80%" : index == 6 ? "81.20%" : index == 7 ? "100.00%" : index == 8 ? "111.00%" : "127.20%"
 
+// TradingView rejects bar-index drawings whose x-coordinate is more than
+// 5,000 bars behind the executing bar. Keep a one-bar safety margin so old
+// archived cycles never stop the live engine with RE10026.
+f_bar_drawable(candidateBar) =>
+    not na(candidateBar) and candidateBar >= bar_index - 4999 and candidateBar <= bar_index + 500
+
 f_anchor_fib_price(anchorIndex, ratio) =>
     importantHigh = array.get(swingImportantHigh, anchorIndex)
     importantLow = array.get(swingImportantLow, anchorIndex)
@@ -1430,15 +1442,16 @@ f_anchor_fib_price(anchorIndex, ratio) =>
 f_draw_anchor_fib(anchorIndex) =>
     if showAnchorFib and anchorIndex >= 0 and array.size(swingBars) > anchorIndex
         anchorBar = array.get(swingBars, anchorIndex)
-        for fibIndex = 0 to 9
-            ratio = f_fib_ratio(fibIndex)
-            price = f_anchor_fib_price(anchorIndex, ratio)
-            if not na(price)
-                opacity = ratio == 0.0 or ratio == 1.0 ? 35 : 55
-                ln = line.new(anchorBar, price, bar_index, price, extend=extend.right, color=color.new(fibLineColor, opacity), width=1, force_overlay=true)
-                lb = label.new(bar_index, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.tiny, force_overlay=true)
-                array.push(anchorFibLines, ln)
-                array.push(anchorFibLabels, lb)
+        if f_bar_drawable(anchorBar)
+            for fibIndex = 0 to 9
+                ratio = f_fib_ratio(fibIndex)
+                price = f_anchor_fib_price(anchorIndex, ratio)
+                if not na(price)
+                    opacity = ratio == 0.0 or ratio == 1.0 ? 35 : 55
+                    ln = line.new(anchorBar, price, bar_index, price, extend=extend.right, color=color.new(fibLineColor, opacity), width=1, force_overlay=true)
+                    lb = label.new(bar_index, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.tiny, force_overlay=true)
+                    array.push(anchorFibLines, ln)
+                    array.push(anchorFibLabels, lb)
 
 f_draw_wave5_targets(cycleStart) =>
     wave4Phase = f_wave4_complete_phase()
@@ -1450,14 +1463,15 @@ f_draw_wave5_targets(cycleStart) =>
         base = math.abs(p3 - p4)
         minTarget = bullish ? p4 + base * wave5MinExtension : p4 - base * wave5MinExtension
         maxTarget = bullish ? p4 + base * wave5MaxExtension : p4 - base * wave5MaxExtension
-        minLine = line.new(b4, minTarget, bar_index, minTarget, extend=extend.right, color=color.new(color.green, 45), style=line.style_dashed, force_overlay=true)
-        maxLine = line.new(b4, maxTarget, bar_index, maxTarget, extend=extend.right, color=color.new(color.green, 70), style=line.style_dotted, force_overlay=true)
-        array.push(targetLines, minLine)
-        array.push(targetLines, maxLine)
+        if f_bar_drawable(b4)
+            minLine = line.new(b4, minTarget, bar_index, minTarget, extend=extend.right, color=color.new(color.green, 45), style=line.style_dashed, force_overlay=true)
+            maxLine = line.new(b4, maxTarget, bar_index, maxTarget, extend=extend.right, color=color.new(color.green, 70), style=line.style_dotted, force_overlay=true)
+            array.push(targetLines, minLine)
+            array.push(targetLines, maxLine)
 
 f_draw_locked_fib() =>
     importantRange = lockedImportantHigh - lockedImportantLow
-    if showAnchorFib and baseLocked and not na(importantRange) and importantRange > 0
+    if showAnchorFib and baseLocked and f_bar_drawable(lockedBaseBar) and not na(importantRange) and importantRange > 0
         for fibIndex = 0 to 9
             ratio = f_fib_ratio(fibIndex)
             price = lockedBullish ? lockedImportantLow + importantRange * ratio : lockedImportantHigh - importantRange * ratio
@@ -1509,13 +1523,14 @@ f_redraw_history() =>
             nodePrefix = str.substring(nodeText, 0, 1)
             isCorrectionNode = not (nodePrefix == "0" or nodePrefix == "1" or nodePrefix == "2" or nodePrefix == "3" or nodePrefix == "4" or nodePrefix == "5")
             nodeColor = isCorrectionNode ? correctionLineColor : nodePrefix == "0" ? color.rgb(38, 41, 49) : nodePrefix == "2" or nodePrefix == "4" ? color.rgb(235, 62, 71) : color.rgb(255, 145, 0)
-            if cycleVisible and historyIndex > 0 and array.get(historyCycleIds, historyIndex - 1) == cycleId
+            if cycleVisible and f_bar_drawable(nodeBar) and historyIndex > 0 and array.get(historyCycleIds, historyIndex - 1) == cycleId
                 priorBar = array.get(historyBars, historyIndex - 1)
                 priorPrice = array.get(historyPrices, historyIndex - 1)
                 segmentColor = isCorrectionNode ? correctionLineColor : impulseLineColor
-                historyLine = line.new(priorBar, priorPrice, nodeBar, nodePrice, color=segmentColor, width=2, force_overlay=true)
-                array.push(drawnLines, historyLine)
-            if cycleVisible and (showZero or nodeText != "0")
+                if f_bar_drawable(priorBar)
+                    historyLine = line.new(priorBar, priorPrice, nodeBar, nodePrice, color=segmentColor, width=2, force_overlay=true)
+                    array.push(drawnLines, historyLine)
+            if cycleVisible and f_bar_drawable(nodeBar) and (showZero or nodeText != "0")
                 displayText = isCorrectionNode ? "(" + nodeText + ")" : nodeText
                 nodeStyle = nodeAbove ? label.style_label_down : label.style_label_up
                 historyLabel = label.new(nodeBar, nodePrice, text=displayText, style=nodeStyle, yloc=yloc.price, color=nodeColor, textcolor=labelTextColor, size=f_label_size(), tooltip="Locked completed cycle " + str.tostring(cycleId + 1) + ". Historical endpoints remain fixed unless a logged recount invalidates them.", force_overlay=true)
@@ -1524,7 +1539,7 @@ f_redraw_history() =>
 f_redraw_candidate() =>
     f_clear_drawings()
     f_redraw_history()
-    if baseLocked
+    if baseLocked and f_bar_drawable(lockedBaseBar)
         baseStyle = lockedBullish ? label.style_label_up : label.style_label_down
         w1Style = lockedBullish ? label.style_label_down : label.style_label_up
         baseLabel = label.new(lockedBaseBar, lockedBasePrice, text="0", style=baseStyle, yloc=yloc.price, color=color.new(color.black, 0), textcolor=labelTextColor, size=f_label_size(), tooltip="Locked Point 0. It changes only after a hard origin invalidation.", force_overlay=true)
@@ -1636,8 +1651,8 @@ f_redraw_candidate() =>
                 latestStyle = latestType == 1 ? label.style_label_down : label.style_label_up
                 candidateLabel = label.new(latestBar, latestPrice, text=developingText, style=latestStyle, yloc=yloc.price, color=color.new(color.gray, 35), textcolor=color.white, size=size.tiny, tooltip="Developing raw pivot. It is promoted only after its parent-state rules pass.", force_overlay=true)
                 array.push(drawnLabels, candidateLabel)
-    if not na(lastInvalidBar)
-        invalidLabel = label.new(lastInvalidBar, lastInvalidPrice, text="INVALID\nrecount " + str.tostring(recountCount), style=label.style_label_down, yloc=yloc.price, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny, tooltip="W2_ORIGIN_BREAK: the locked Point 0 was crossed and released.", force_overlay=true)
+    if f_bar_drawable(lastInvalidBar)
+        invalidLabel = label.new(lastInvalidBar, lastInvalidPrice, text="INVALID\nrecount " + str.tostring(recountCount), style=label.style_label_down, yloc=yloc.price, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny, tooltip=lastInvalidReason, force_overlay=true)
         array.push(drawnLabels, invalidLabel)
 
 f_redraw() =>
@@ -1660,9 +1675,10 @@ f_redraw() =>
                         prevBar = array.get(swingBars, i - 1)
                         prevPrice = array.get(swingPrices, i - 1)
                         lineColor = f_is_impulse_phase(phase) ? impulseLineColor : correctionLineColor
-                        ln = line.new(prevBar, prevPrice, b, p, color=lineColor, width=2, force_overlay=true)
-                        array.push(drawnLines, ln)
-                if showZero or phase != 0
+                        if f_bar_drawable(prevBar) and f_bar_drawable(b)
+                            ln = line.new(prevBar, prevPrice, b, p, color=lineColor, width=2, force_overlay=true)
+                            array.push(drawnLines, ln)
+                if f_bar_drawable(b) and (showZero or phase != 0)
                     [hardInvalid, softWarn, note] = f_rule_state(i, phase)
                     style = t == 1 ? label.style_label_down : label.style_label_up
                     lbl = label.new(b, p, text=f_phase_text(phase), style=style, yloc=yloc.price, color=f_label_color(phase, hardInvalid, softWarn), textcolor=labelTextColor, size=f_label_size(), tooltip=note, force_overlay=true)
@@ -1721,15 +1737,27 @@ lowIsImportant = pivotLow <= importantLowAtPivot
 macdLowestAtPivot = pivotMacdHist <= ta.lowest(macdHist, oscillatorLookback)[pivotRight]
 macdHighestAtPivot = pivotMacdHist >= ta.highest(macdHist, oscillatorLookback)[pivotRight]
 changed = false
+retentionInvalidated = false
 
 if not na(pivotHigh) and not na(pivotLow)
     lastPrice = array.size(swingPrices) > 0 ? array.get(swingPrices, array.size(swingPrices) - 1) : close[pivotRight]
     useHigh = math.abs(pivotHigh - lastPrice) >= math.abs(pivotLow - lastPrice)
-    changed := useHigh ? f_upsert_swing(pivotBar, pivotHigh, 1, pivotAtr, pivotMacdHist, pivotRsi, macdHighestAtPivot, highIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot) : f_upsert_swing(pivotBar, pivotLow, -1, pivotAtr, pivotMacdHist, pivotRsi, macdLowestAtPivot, lowIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot)
+    if useHigh
+        [swingChanged, endpointEvicted] = f_upsert_swing(pivotBar, pivotHigh, 1, pivotAtr, pivotMacdHist, pivotRsi, macdHighestAtPivot, highIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot)
+        changed := swingChanged
+        retentionInvalidated := endpointEvicted
+    else
+        [swingChanged, endpointEvicted] = f_upsert_swing(pivotBar, pivotLow, -1, pivotAtr, pivotMacdHist, pivotRsi, macdLowestAtPivot, lowIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot)
+        changed := swingChanged
+        retentionInvalidated := endpointEvicted
 else if not na(pivotHigh)
-    changed := f_upsert_swing(pivotBar, pivotHigh, 1, pivotAtr, pivotMacdHist, pivotRsi, macdHighestAtPivot, highIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot)
+    [swingChanged, endpointEvicted] = f_upsert_swing(pivotBar, pivotHigh, 1, pivotAtr, pivotMacdHist, pivotRsi, macdHighestAtPivot, highIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot)
+    changed := swingChanged
+    retentionInvalidated := endpointEvicted
 else if not na(pivotLow)
-    changed := f_upsert_swing(pivotBar, pivotLow, -1, pivotAtr, pivotMacdHist, pivotRsi, macdLowestAtPivot, lowIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot)
+    [swingChanged, endpointEvicted] = f_upsert_swing(pivotBar, pivotLow, -1, pivotAtr, pivotMacdHist, pivotRsi, macdLowestAtPivot, lowIsImportant, importantRangeAtPivot, importantHighAtPivot, importantLowAtPivot, importantHighBarAtPivot, importantLowBarAtPivot)
+    changed := swingChanged
+    retentionInvalidated := endpointEvicted
 
 if f_is_candidate_mode() and not baseLocked and barstate.isconfirmed
     [developedStart, developedBullish, developedBar, developedLevel, developedProgress, developedTimeRatio, developedTimeRule] = f_find_developed_base()
@@ -1766,14 +1794,29 @@ if f_is_candidate_mode() and not baseLocked and barstate.isconfirmed
 
 originProtected = engineStage == "W1_FORMING" or engineStage == "W2_CORRECTION_CONTAINER" or engineStage == "W3_FORMING" or engineStage == "W4_CORRECTION_CONTAINER" or engineStage == "W5_FORMING"
 originBroken = f_is_candidate_mode() and baseLocked and originProtected and bar_index > lockedAtBar and (lockedBullish ? low <= lockedBasePrice : high >= lockedBasePrice)
-if originBroken
+chartSeconds = math.max(1.0, timeframe.in_seconds())
+degreeSeconds = math.max(chartSeconds, timeframe.in_seconds(degreeSourceTimeframe))
+degreeWindowChartBars = int(math.ceil(importantLookbackDays * degreeSeconds / chartSeconds))
+baseOutsideDegreeWindow = f_is_candidate_mode() and baseLocked and bar_index - lockedBaseBar > degreeWindowChartBars
+if originBroken or retentionInvalidated or baseOutsideDegreeWindow
     baseLocked := false
     candidateState := "INVALID"
-    lastReasonCode := "W2_ORIGIN_BREAK"
+    if originBroken
+        lastReasonCode := "W2_ORIGIN_BREAK"
+    else if retentionInvalidated
+        lastReasonCode := "ACTIVE_ENDPOINT_EVICTED"
+    else
+        lastReasonCode := "ACTIVE_DEGREE_WINDOW_EXPIRED"
     recountCount += 1
-    searchFloorBar := bar_index
+    if originBroken
+        searchFloorBar := bar_index
+    else if baseOutsideDegreeWindow
+        searchFloorBar := math.max(0, bar_index - degreeWindowChartBars)
+    else
+        searchFloorBar := array.size(swingBars) > 0 ? array.first(swingBars) : bar_index
     lastInvalidBar := bar_index
     lastInvalidPrice := lockedBullish ? low : high
+    lastInvalidReason := originBroken ? "W2_ORIGIN_BREAK: the locked Point 0 was crossed and released." : retentionInvalidated ? "ACTIVE_ENDPOINT_EVICTED: the full pivot path no longer fits the configured retention window, so the stale count was released and recounted from retained data." : "ACTIVE_DEGREE_WINDOW_EXPIRED: Point 0 left the configured Important H/L source window, so this degree released the stale count and searched inside the current window."
     developingText := ""
     lockedBaseBar := na
     lockedBasePrice := na
