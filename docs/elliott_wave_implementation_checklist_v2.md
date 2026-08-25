@@ -20,10 +20,11 @@ The older manuals and chart images remain supporting references.
 | --- | --- | --- |
 | Keep confirmed raw pivots separate from main Elliott pivots | DONE | `ew_raw_*` and `ew_*` are separate in Python; Pine retains raw swing arrays while drawing only locked main labels. |
 | Replace modulo counting with a candidate lifecycle | DONE | Candidate State is the default; Legacy fixed-cycle mode is retained only for comparison. |
-| Qualify Point 0 using Important H/L, degree progress, ATR and configurable oscillator evidence | DONE | Supports MACD extreme, RSI/MACD divergence, both, either, or off. |
-| Require a 5/9/13/17/21-move Wave 1 candidate | DONE | Candidate confirmation records the selected internal count and extension subtype. |
-| Require at least 61.8% degree progress before Wave 1 confirmation | DONE | Exported as `ew_w1_degree_progress` and shown in the Pine evidence panel. |
-| Lock Point 0 and Wave 1 after confirmation | DONE | Confirmed bars/prices are copied into persistent state and cannot be moved by a later minor pivot. |
+| Qualify Point 0 using a significant degree swing, Important H/L context, degree progress and time | DONE | The default structural significance gate uses the stronger ATR/range filter. Oscillator evidence supports candidate ranking but does not reject a structurally valid origin. |
+| Lock Point 0 at the closed 61.8% development event | DONE | `W1_DEVELOPED` locks Point 0 when the 61.8%-at-half-time or 100%-at-equal-time rule passes. This event is prefix-invariant and is not invented later at the Wave-1 terminal. |
+| Require a later 5/9/13/17/21-move Wave 1 terminal | DONE | `W1_FORMING` retains only `0` and `1?`; the Wave-1 endpoint is locked separately after its permitted terminal pivot confirms. |
+| Keep 61.8% development separate from the Wave-1 endpoint | DONE | `lockedW1DevelopmentBar`/`ew_fib_value` record the development touch, while `lockedW1Bar`/`ew_locked_wave1_price` remain empty until completion. |
+| Preserve locked Point 0 and Wave 1 after their respective confirmations | DONE | Future minor pivots cannot move either locked event; Point-0 protection begins immediately in `W1_FORMING`. |
 | Preserve a qualified same-side pivot as an alternate | DONE | Alternate-base evidence is recorded without replacing the locked base. |
 | Reject a count when price crosses locked Point 0 | DONE | Hard reason `W2_ORIGIN_BREAK` releases the count before the impulse is complete. |
 | Start a controlled recount after hard invalidation | DONE | Recount number/reason persist and the new search starts after the invalidation boundary. |

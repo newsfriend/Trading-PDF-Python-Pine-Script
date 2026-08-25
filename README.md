@@ -55,9 +55,13 @@ keeps the dashboard above chart candles and now provides:
 - Separate raw pivots and main Elliott labels.
 - Degree-source Important High/Low context (Daily by default in Pine) and a
   true 144-calendar-day context in Python.
-- Configurable MACD-extreme and RSI/MACD-divergence base confirmation.
-- Wave 1 candidates with 5/9/13/17/21 internal moves and 61.8% degree progress.
-- Persistent Point 0/Wave 1 locking so later small swings cannot move the count.
+- Significant-degree Point-0 selection with MACD/RSI used as ranking evidence,
+  not as a mandatory structural gate.
+- A two-stage Wave-1 lifecycle: the closed 61.8%-at-half-time or
+  100%-at-equal-time event locks Point 0, then a later 5/9/13/17/21 terminal
+  locks Wave 1.
+- Prefix-invariant Point 0/Wave 1 events so later small swings cannot move or
+  retroactively create the count.
 - Hard origin invalidation, reason codes, alternate bases, and controlled recounts.
 - Wave 2 and Wave 4 correction containers with parallel simple Zig-Zag/Flat
   candidates and pattern-specific B-wave ranges.

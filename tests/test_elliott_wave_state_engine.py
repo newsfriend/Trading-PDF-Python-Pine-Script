@@ -54,6 +54,9 @@ def _swing(
         important_range=100.0,
         important_high=100.0,
         important_low=0.0,
+        degree_significant=important,
+        important_high_position=position - 10,
+        important_low_position=position - 10,
     )
 
 
@@ -144,6 +147,16 @@ def _through_larger_abc_cycles(count):
                     price=price_offset + swing.price,
                     important_high=price_offset + swing.important_high,
                     important_low=price_offset + swing.important_low,
+                    important_high_position=(
+                        position_offset + swing.important_high_position
+                        if swing.important_high_position is not None
+                        else None
+                    ),
+                    important_low_position=(
+                        position_offset + swing.important_low_position
+                        if swing.important_low_position is not None
+                        else None
+                    ),
                 )
             )
     return first
@@ -264,6 +277,90 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
         self.assertEqual(state["active"]["end_idx"], 5)
         self.assertEqual(state["active"]["internal_count"], 5)
         self.assertAlmostEqual(state["active"]["degree_progress"], 0.62)
+
+    def test_v4_w1_development_event_precedes_terminal_confirmation(self):
+        swings = _confirmed_wave1()
+        swings[0] = replace(swings[0], important_high_position=-6)
+        state = _run_candidate_state(swings, self.config)
+
+        developed = next(
+            event
+            for event in state["events"]
+            if event["values"].get("ew_reason_code") == "W1_DEVELOPED"
+        )
+        confirmed = next(
+            event
+            for event in state["events"]
+            if event["values"].get("ew_reason_code") == "W1_CONFIRMED"
+        )
+        self.assertEqual(developed["confirmed_index"], swings[-1].index)
+        self.assertEqual(confirmed["confirmed_index"], swings[-1].confirmed_index)
+        self.assertLess(developed["confirmed_index"], confirmed["confirmed_index"])
+        self.assertEqual(developed["values"]["ew_parent_state"], "W1_FORMING")
+
+    def test_v4_w1_development_event_is_prefix_invariant(self):
+        swings = _confirmed_wave1()
+        swings[0] = replace(swings[0], important_high_position=-6)
+        index = pd.date_range("2025-01-01", periods=7, freq="D")
+        source = pd.DataFrame(
+            {
+                "high": [1.0, 25.0, 16.0, 62.0, 31.0, 62.0, 61.0],
+                "low": [0.0, 14.0, 15.0, 29.0, 30.0, 60.0, 59.0],
+            },
+            index=index,
+        )
+
+        prefix = _run_candidate_state(swings[:3], self.config, source.iloc[:4])
+        complete = _run_candidate_state(swings, self.config, source)
+
+        prefix_developed = next(
+            event
+            for event in prefix["events"]
+            if event["values"].get("ew_reason_code") == "W1_DEVELOPED"
+        )
+        complete_developed = next(
+            event
+            for event in complete["events"]
+            if event["values"].get("ew_reason_code") == "W1_DEVELOPED"
+        )
+        self.assertEqual(prefix["final_state"], "W1_FORMING")
+        self.assertEqual(prefix_developed, complete_developed)
+        self.assertTrue(
+            any(
+                event["values"].get("ew_reason_code") == "W1_CONFIRMED"
+                for event in complete["events"]
+            )
+        )
+
+    def test_v4_w1_time_gate_is_mandatory(self):
+        swings = _confirmed_wave1()
+        swings[0] = replace(swings[0], important_high_position=-100)
+
+        state = _run_candidate_state(swings, self.config)
+
+        self.assertIsNone(state["active"])
+        self.assertEqual(state["last_reason_code"], "SEARCHING_FOR_BASE")
+
+    def test_v4_point0_oscillator_is_support_not_a_hard_gate(self):
+        swings = _confirmed_wave1()
+        swings[0] = replace(
+            swings[0],
+            important_extreme=False,
+            macd_extreme=False,
+            degree_significant=True,
+        )
+        state = _run_candidate_state(
+            swings,
+            replace(
+                self.config,
+                wave1_start_mode="Significant degree swing",
+                base_oscillator_mode="Extreme only",
+            ),
+        )
+
+        self.assertIsNotNone(state["active"])
+        self.assertEqual(state["active"]["waves"]["1"]["reason_code"], "W1_CONFIRMED")
+        self.assertIn("no oscillator support", state["active"]["waves"]["1"]["note"])
 
     def test_t02_normal_w2_requires_internal_correction_completion(self):
         state = _run_candidate_state(_through_w2(), self.config)
@@ -457,7 +554,12 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             13, 11, 18, 13, 15, 9, 14, 11, 20, 15, 25.18,
         )
         swings = [_swing(i, price, -1 if i % 2 == 0 else 1) for i, price in enumerate(prices)]
-        swings[0] = replace(swings[0], important_extreme=True, macd_extreme=True)
+        swings[0] = replace(
+            swings[0],
+            important_extreme=True,
+            macd_extreme=True,
+            important_high_position=-38,
+        )
         diagonal = _evaluate_diagonal(swings, 0, 21, "leading")
         self.assertTrue(diagonal["confirmed"])
         self.assertEqual(diagonal["internal_pattern"], "5-3-5-3-5")

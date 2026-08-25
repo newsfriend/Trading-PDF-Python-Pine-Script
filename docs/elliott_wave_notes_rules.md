@@ -26,12 +26,17 @@ become the next Elliott label.
 
 The implemented parent-state path is:
 
-`SEARCHING -> W2_CORRECTION_CONTAINER -> W3_FORMING -> W4_CORRECTION_CONTAINER -> W5_FORMING -> LARGER_CORRECTION_CONTAINER -> CORRECTION_CONFIRMED`
+`SEARCHING -> W1_FORMING -> W2_CORRECTION_CONTAINER -> W3_FORMING -> W4_CORRECTION_CONTAINER -> W5_FORMING -> LARGER_CORRECTION_CONTAINER -> CORRECTION_CONFIRMED`
 
-Point 0 and Wave 1 require Important High/Low context, at least 61.8% degree
-progress, 5/9/13/17/21 internal moves, the configured ATR and oscillator
-evidence, and an intact origin. Confirmed main-wave bars/prices are copied into
-locked state so later minor pivots cannot move them.
+Point 0 first requires a significant degree swing, Important High/Low context,
+an intact origin, and the mandatory closed-bar time/development event: either
+61.8% development near half the preceding Important H/L duration or 100%
+development near equal duration, with the fixed tolerance. That event locks
+Point 0 and opens `W1_FORMING`; it is not the Wave-1 endpoint. Wave 1 locks only
+after a later permitted 5/9/13/17/21-move terminal confirms. MACD/RSI evidence
+ranks and explains candidates but is not a hard Point-0 gate. Confirmed event
+times and main-wave bars/prices are copied into locked state so later candles
+cannot move them.
 
 The core impulse implementation then provides:
 

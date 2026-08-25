@@ -16,6 +16,44 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.source,
         )
 
+    def test_v4_point0_and_w1_are_separate_lifecycle_states(self):
+        for token in (
+            'input.string("Significant degree swing", "Start filter"',
+            'engineStage := "W1_FORMING"',
+            'lastReasonCode := "W1_DEVELOPED"',
+            'lastReasonCode := "W1_CONFIRMED"',
+            'engineStage := "W2_CORRECTION_CONTAINER"',
+            'f_find_developed_base',
+            'lockedW1Bar := na',
+            'if not na(lockedW1Bar)',
+        ):
+            self.assertIn(token, self.source)
+        developed = self.source.index('lastReasonCode := "W1_DEVELOPED"')
+        confirmed = self.source.index('lastReasonCode := "W1_CONFIRMED"', developed)
+        self.assertLess(developed, confirmed)
+
+    def test_v4_w1_time_and_degree_significance_are_hard_gates(self):
+        for token in (
+            "degreePivotAtrMultiple",
+            "degreePivotRangePct",
+            "swingDegreeSignificant",
+            "swingImportantHighBar",
+            "swingImportantLowBar",
+            '"W1_TIME_61_8_AT_HALF"',
+            '"W1_TIME_100_AT_EQUAL"',
+            '"W1_TIME_GATE_FAIL"',
+            "timePass and atrOk and originOk",
+        ):
+            self.assertIn(token, self.source)
+
+    def test_v4_point0_oscillator_is_ranking_evidence_only(self):
+        self.assertIn("candidateRank :=", self.source)
+        self.assertIn("oscillatorEvidence ? 10000", self.source)
+        self.assertNotIn(
+            "importantOk and degreeOk and timePass and atrOk and oscillatorOk",
+            self.source,
+        )
+
     def test_dashboard_preserves_original_positions_in_the_foreground(self):
         self.assertIn(
             'indicator("Elliott Wave Notes Overlay", overlay=true, behind_chart=false',

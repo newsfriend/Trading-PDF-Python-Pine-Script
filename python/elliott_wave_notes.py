@@ -72,10 +72,12 @@ class ElliottWaveConfig:
     max_completed_cycles: int = 3
     min_swing_atr_multiple: float = 1.5
     min_swing_range_pct: float = 0.03
+    degree_pivot_atr_multiple: float = 3.0
+    degree_pivot_range_pct: float = 0.10
     correction_pattern: str = "A-B-C"
     show_wave4_internal: bool = True
     count_mode: str = "Validated Anchor"
-    wave1_start_mode: str = "Important swing + oscillator"
+    wave1_start_mode: str = "Significant degree swing"
     base_oscillator_mode: str = "Extreme or divergence"
     anchor_direction: str = "Auto"
     important_atr_length: int = 14
@@ -130,6 +132,9 @@ class _Swing:
     important_range: float
     important_high: float
     important_low: float
+    degree_significant: bool = False
+    important_high_position: int | None = None
+    important_low_position: int | None = None
 
 
 def compute_elliott_waves(
@@ -424,7 +429,12 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
     }
     if cfg.correction_pattern not in valid_patterns:
         raise ValueError(f"correction_pattern must be one of {sorted(valid_patterns)}")
-    valid_start_modes = {"Off", "Important swing", "Important swing + oscillator"}
+    valid_start_modes = {
+        "Off",
+        "Significant degree swing",
+        "Important swing",
+        "Important swing + oscillator",
+    }
     if cfg.wave1_start_mode not in valid_start_modes:
         raise ValueError(f"wave1_start_mode must be one of {sorted(valid_start_modes)}")
     valid_count_modes = {"Validated Anchor", "All swings"}
@@ -457,6 +467,8 @@ def _validate_config(cfg: ElliottWaveConfig) -> None:
     if (
         cfg.min_swing_atr_multiple < 0
         or cfg.min_swing_range_pct < 0
+        or cfg.degree_pivot_atr_multiple < 0
+        or cfg.degree_pivot_range_pct < 0
         or cfg.important_atr_multiple < 0
     ):
         raise ValueError("Swing and ATR thresholds cannot be negative")
@@ -548,15 +560,31 @@ def _with_indicators(
         context_low = context["low"].astype(float).rolling(
             cfg.important_lookback, min_periods=1
         ).min()
+        context_high_time = _rolling_extreme_index(
+            context["high"].astype(float), cfg.important_lookback, "max"
+        )
+        context_low_time = _rolling_extreme_index(
+            context["low"].astype(float), cfg.important_lookback, "min"
+        )
         source_is_context = enriched.index.equals(context.index)
         if not source_is_context:
             context_high = context_high.shift(1)
             context_low = context_low.shift(1)
+            context_high_time = context_high_time.shift(1)
+            context_low_time = context_low_time.shift(1)
         enriched["_ew_important_high"] = context_high.reindex(
             enriched.index, method="ffill"
         )
         enriched["_ew_important_low"] = context_low.reindex(
             enriched.index, method="ffill"
+        )
+        high_times = context_high_time.reindex(enriched.index, method="ffill")
+        low_times = context_low_time.reindex(enriched.index, method="ffill")
+        enriched["_ew_important_high_position"] = _timestamps_to_positions(
+            enriched.index, high_times
+        )
+        enriched["_ew_important_low_position"] = _timestamps_to_positions(
+            enriched.index, low_times
         )
     elif cfg.important_context_mode == "Calendar days":
         if not isinstance(enriched.index, pd.DatetimeIndex):
@@ -567,6 +595,14 @@ def _with_indicators(
         window = f"{cfg.important_lookback_days}D"
         enriched["_ew_important_high"] = high.rolling(window, min_periods=1).max()
         enriched["_ew_important_low"] = low.rolling(window, min_periods=1).min()
+        high_times = _rolling_time_extreme_index(high, window, "max")
+        low_times = _rolling_time_extreme_index(low, window, "min")
+        enriched["_ew_important_high_position"] = _timestamps_to_positions(
+            enriched.index, high_times
+        )
+        enriched["_ew_important_low_position"] = _timestamps_to_positions(
+            enriched.index, low_times
+        )
     else:
         enriched["_ew_important_high"] = high.rolling(
             cfg.important_lookback, min_periods=1
@@ -574,6 +610,12 @@ def _with_indicators(
         enriched["_ew_important_low"] = low.rolling(
             cfg.important_lookback, min_periods=1
         ).min()
+        enriched["_ew_important_high_position"] = _rolling_extreme_positions(
+            high.to_numpy(dtype=float), cfg.important_lookback, "max"
+        )
+        enriched["_ew_important_low_position"] = _rolling_extreme_positions(
+            low.to_numpy(dtype=float), cfg.important_lookback, "min"
+        )
     enriched["_ew_important_range"] = (
         enriched["_ew_important_high"] - enriched["_ew_important_low"]
     )
@@ -608,6 +650,51 @@ def _with_indicators(
     return enriched
 
 
+def _rolling_extreme_positions(
+    values: np.ndarray, window: int, mode: str
+) -> np.ndarray:
+    """Return the source position of each rolling price extreme."""
+
+    positions = np.zeros(len(values), dtype=int)
+    for position in range(len(values)):
+        start = max(0, position - window + 1)
+        local = values[start : position + 1]
+        offset = int(np.argmax(local) if mode == "max" else np.argmin(local))
+        positions[position] = start + offset
+    return positions
+
+
+def _rolling_extreme_index(
+    values: pd.Series, window: int, mode: str
+) -> pd.Series:
+    positions = _rolling_extreme_positions(values.to_numpy(dtype=float), window, mode)
+    return pd.Series(values.index.take(positions), index=values.index, dtype="object")
+
+
+def _rolling_time_extreme_index(
+    values: pd.Series, window: str, mode: str
+) -> pd.Series:
+    outputs: list[object] = []
+    for timestamp in values.index:
+        start = timestamp - pd.Timedelta(window)
+        sample = values.loc[start:timestamp]
+        outputs.append(sample.idxmax() if mode == "max" else sample.idxmin())
+    return pd.Series(outputs, index=values.index, dtype="object")
+
+
+def _timestamps_to_positions(
+    source_index: pd.DatetimeIndex, timestamps: pd.Series
+) -> np.ndarray:
+    values = np.full(len(source_index), -1, dtype=int)
+    for position, timestamp in enumerate(timestamps):
+        if pd.isna(timestamp):
+            continue
+        values[position] = max(
+            0, int(source_index.searchsorted(pd.Timestamp(timestamp), side="left"))
+        )
+    return values
+
+
 def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]:
     highs = source["high"].astype(float).to_numpy()
     lows = source["low"].astype(float).to_numpy()
@@ -619,6 +706,8 @@ def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]
     context_highs = source["_ew_important_high"].astype(float).to_numpy()
     context_lows = source["_ew_important_low"].astype(float).to_numpy()
     context_ranges = source["_ew_important_range"].astype(float).to_numpy()
+    context_high_positions = source["_ew_important_high_position"].astype(int).to_numpy()
+    context_low_positions = source["_ew_important_low_position"].astype(int).to_numpy()
     pivots: list[_Swing] = []
 
     for position in range(cfg.pivot_left, len(source) - cfg.pivot_right):
@@ -646,6 +735,9 @@ def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]
                     important_range,
                     important_high,
                     important_low,
+                    False,
+                    int(context_high_positions[position]),
+                    int(context_low_positions[position]),
                 )
             )
         if not np.isnan(low_window).any() and lows[position] == np.min(low_window):
@@ -665,6 +757,9 @@ def _detect_pivots(source: pd.DataFrame, cfg: ElliottWaveConfig) -> list[_Swing]
                     important_range,
                     important_high,
                     important_low,
+                    False,
+                    int(context_high_positions[position]),
+                    int(context_low_positions[position]),
                 )
             )
 
@@ -677,7 +772,7 @@ def _build_swings(pivots: list[_Swing], cfg: ElliottWaveConfig) -> list[_Swing]:
 
     for pivot in pivots:
         if not swings:
-            swings.append(pivot)
+            swings.append(replace(pivot, degree_significant=pivot.important_extreme))
             continue
 
         last = swings[-1]
@@ -691,9 +786,22 @@ def _build_swings(pivots: list[_Swing], cfg: ElliottWaveConfig) -> list[_Swing]:
         if pivot.kind == last.kind:
             more_extreme = pivot.price > last.price if pivot.kind == 1 else pivot.price < last.price
             if more_extreme:
-                swings[-1] = pivot
+                swings[-1] = replace(
+                    pivot,
+                    degree_significant=(
+                        last.degree_significant or pivot.important_extreme
+                    ),
+                )
         elif _passes_swing_filter(pivot, last, cfg):
-            swings.append(pivot)
+            degree_move = _passes_degree_filter(pivot, last, cfg)
+            if not last.degree_significant and degree_move:
+                swings[-1] = replace(last, degree_significant=True)
+            swings.append(
+                replace(
+                    pivot,
+                    degree_significant=pivot.important_extreme or degree_move,
+                )
+            )
 
     return swings
 
@@ -702,6 +810,23 @@ def _passes_swing_filter(pivot: _Swing, last: _Swing, cfg: ElliottWaveConfig) ->
     distance = abs(pivot.price - last.price)
     min_by_atr = pivot.atr * cfg.min_swing_atr_multiple if np.isfinite(pivot.atr) else 0.0
     min_by_range = pivot.important_range * cfg.min_swing_range_pct if np.isfinite(pivot.important_range) else 0.0
+    return distance >= max(min_by_atr, min_by_range)
+
+
+def _passes_degree_filter(pivot: _Swing, last: _Swing, cfg: ElliottWaveConfig) -> bool:
+    """Reject minor internal pivots without making the 144-day extreme the origin."""
+
+    distance = abs(pivot.price - last.price)
+    min_by_atr = (
+        pivot.atr * cfg.degree_pivot_atr_multiple
+        if np.isfinite(pivot.atr)
+        else 0.0
+    )
+    min_by_range = (
+        pivot.important_range * cfg.degree_pivot_range_pct
+        if np.isfinite(pivot.important_range)
+        else 0.0
+    )
     return distance >= max(min_by_atr, min_by_range)
 
 
@@ -983,6 +1108,94 @@ def _degree_metadata(cfg: ElliottWaveConfig) -> tuple[str, str]:
     return cfg.degree_name, cfg.degree_timeframe
 
 
+def _start_developing_wave1(
+    candidate: dict[str, object], cycle_id: int
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Lock Point 0 at the closed development event without inventing W1."""
+
+    active = dict(candidate)
+    active.update(
+        {
+            "cycle_id": cycle_id,
+            "last_checked_position": int(candidate["development_position"]),
+            "parent_state": "W1_FORMING",
+            "next_condition": (
+                "Need a completed 5/9/13/17/21 Wave-1 or permitted "
+                "Leading Diagonal terminal."
+            ),
+            "waves": {
+                "0": _make_wave_record(
+                    swing_idx=int(candidate["start_idx"]),
+                    pattern="Base",
+                    subtype="LOCKED_BASE",
+                    reason_code="BASE_LOCKED",
+                    source_rule_id="V4-P7-W1-DEVELOPMENT",
+                    note=(
+                        "Significant Point 0 locked by the closed 61.8% "
+                        "degree-development and Wave-1 time event."
+                    ),
+                )
+            },
+        }
+    )
+    event = {
+        "index": candidate["development_index"],
+        "confirmed_index": candidate["development_index"],
+        "cycle_id": cycle_id,
+        "values": {
+            "ew_engine_state": "FORMING",
+            "ew_candidate_label": "1?",
+            "ew_pattern": "Motive",
+            "ew_subtype": "W1_DEVELOPED",
+            "ew_reason_code": "W1_DEVELOPED",
+            "ew_rule_state": "forming",
+            "ew_rule_note": (
+                "Point 0 locked after the closed 61.8% degree-development "
+                "event; Wave 1 awaits a confirmed terminal pivot."
+            ),
+            "ew_next_condition": active["next_condition"],
+            "ew_parent_state": "W1_FORMING",
+            "ew_source_rule_id": "V4-P7-W1-DEVELOPMENT",
+            "ew_base_locked": True,
+            "ew_base_price": candidate["base_price"],
+            "ew_base_position": candidate["base_position"],
+            "ew_w1_degree_progress": candidate["degree_progress"],
+            "ew_fib_value": candidate["development_level"],
+            "ew_time_value": candidate["w1_time_ratio"],
+            "ew_locked_point0_price": candidate["base_price"],
+            "ew_locked_wave1_price": np.nan,
+            "ew_locked_wave2_price": np.nan,
+            "ew_locked_wave3_price": np.nan,
+            "ew_locked_wave4_price": np.nan,
+            "ew_locked_wave5_price": np.nan,
+        },
+    }
+    return active, event
+
+
+def _confirm_developing_wave1(
+    active: dict[str, object], candidate: dict[str, object]
+) -> None:
+    active.update(candidate)
+    active["parent_state"] = "W2_CORRECTION_CONTAINER"
+    active["next_condition"] = (
+        "Need a valid W2 correction completion while Point 0 remains intact."
+    )
+    active["waves"]["1"] = _make_wave_record(
+        swing_idx=int(candidate["end_idx"]),
+        pattern=str(candidate["pattern"]),
+        subtype=str(candidate["subtype"]),
+        reason_code="W1_CONFIRMED",
+        source_rule_id="V4-P7-W1-COMPLETION",
+        note=str(candidate["note"]),
+        fib_anchor="Important H/L",
+        fib_value=float(candidate["degree_progress"]),
+        time_value=float(candidate["w1_time_ratio"]),
+        internal_pattern=str(candidate["internal_pattern"]),
+        internal_count=int(candidate["internal_count"]),
+    )
+
+
 def _run_candidate_state(
     swings: list[_Swing],
     cfg: ElliottWaveConfig,
@@ -1052,42 +1265,38 @@ def _run_candidate_state(
                 active = None
 
         processed.append(swing_index)
+        started_wave1 = False
         if active is None:
+            developed = _best_developed_base(
+                swings,
+                processed,
+                swing.confirmed_position,
+                search_floor,
+                cfg,
+                source,
+            )
+            if developed is not None:
+                active, development_event = _start_developing_wave1(
+                    developed, next_cycle_id
+                )
+                development_event["values"]["ew_recount_count"] = recount_count
+                events.append(development_event)
+                last_reason_code = "W1_DEVELOPED"
+                started_wave1 = True
+
+        if active is not None and str(active["parent_state"]) == "W1_FORMING":
             candidate = _candidate_ending_at(
-                swings, processed, swing_index, search_floor, cfg, source
+                swings,
+                processed,
+                swing_index,
+                search_floor,
+                cfg,
+                source,
+                locked_start_idx=int(active["start_idx"]),
             )
             if candidate is not None:
-                active = candidate
-                active.update(
-                    {
-                        "cycle_id": next_cycle_id,
-                        "last_checked_position": swing.confirmed_position,
-                        "parent_state": "W2_CORRECTION_CONTAINER",
-                        "next_condition": "Need a valid W2 correction completion while Point 0 remains intact.",
-                        "waves": {
-                            "0": _make_wave_record(
-                                swing_idx=int(candidate["start_idx"]),
-                                pattern="Base",
-                                subtype="LOCKED_BASE",
-                                reason_code="BASE_LOCKED",
-                                source_rule_id="V3-P2-BASE",
-                                note="Qualified Important H/L base locked after Wave 1 degree confirmation.",
-                            ),
-                            "1": _make_wave_record(
-                                swing_idx=int(candidate["end_idx"]),
-                                pattern=str(candidate["pattern"]),
-                                subtype=str(candidate["subtype"]),
-                                reason_code="W1_CONFIRMED",
-                                source_rule_id="V3-P24-W1",
-                                note=str(candidate["note"]),
-                                fib_anchor="Important H/L",
-                                fib_value=float(candidate["degree_progress"]),
-                                internal_pattern=str(candidate["internal_pattern"]),
-                                internal_count=int(candidate["internal_count"]),
-                            ),
-                        },
-                    }
-                )
+                _confirm_developing_wave1(active, candidate)
+                active["last_checked_position"] = swing.confirmed_position
                 last_reason_code = "W1_CONFIRMED"
                 events.append(
                     {
@@ -1104,7 +1313,7 @@ def _run_candidate_state(
                             "ew_rule_note": candidate["note"],
                             "ew_next_condition": active["next_condition"],
                             "ew_parent_state": active["parent_state"],
-                            "ew_source_rule_id": "V3-P24-W1",
+                            "ew_source_rule_id": "V4-P7-W1-COMPLETION",
                             "ew_base_locked": True,
                             "ew_base_price": candidate["base_price"],
                             "ew_base_position": candidate["base_position"],
@@ -1115,23 +1324,49 @@ def _run_candidate_state(
                         },
                     }
                 )
-            else:
+            elif not started_wave1:
                 events.append(
                     {
                         "index": swing.index,
                         "confirmed_index": swing.confirmed_index,
                         "cycle_id": next_cycle_id,
                         "values": {
-                            "ew_engine_state": "SEARCHING",
-                            "ew_reason_code": "SEARCHING_FOR_BASE",
-                            "ew_next_condition": "Wait for a qualified base and a 5/9/13/17/21-move Wave 1 candidate.",
+                            "ew_engine_state": "FORMING",
+                            "ew_candidate_label": "1?",
+                            "ew_pattern": "Motive",
+                            "ew_subtype": "W1_DEVELOPED",
+                            "ew_reason_code": "W1_AWAITING_TERMINAL",
+                            "ew_rule_state": "forming",
+                            "ew_rule_note": "Point 0 is locked; no permitted Wave-1 terminal is confirmed yet.",
+                            "ew_next_condition": active["next_condition"],
+                            "ew_parent_state": "W1_FORMING",
                             "ew_recount_count": recount_count,
-                            "ew_base_locked": False,
-                            **_empty_locked_wave_event_values(),
+                            "ew_base_locked": True,
+                            "ew_base_price": active["base_price"],
+                            "ew_base_position": active["base_position"],
+                            "ew_w1_degree_progress": active["degree_progress"],
+                            **_locked_wave_event_values(active, swings),
                         },
                     }
                 )
-        else:
+
+        if active is None:
+            events.append(
+                {
+                    "index": swing.index,
+                    "confirmed_index": swing.confirmed_index,
+                    "cycle_id": next_cycle_id,
+                    "values": {
+                        "ew_engine_state": "SEARCHING",
+                        "ew_reason_code": "SEARCHING_FOR_BASE",
+                        "ew_next_condition": "Wait for a qualified base and a 5/9/13/17/21-move Wave 1 candidate.",
+                        "ew_recount_count": recount_count,
+                        "ew_base_locked": False,
+                        **_empty_locked_wave_event_values(),
+                    },
+                }
+            )
+        elif str(active["parent_state"]) != "W1_FORMING":
             active["last_checked_position"] = swing.confirmed_position
             if swing_index != active["end_idx"]:
                 base = swings[int(active["start_idx"])]
@@ -1197,6 +1432,23 @@ def _run_candidate_state(
                         },
                     }
                 )
+
+    if active is None and source is not None and processed:
+        developed = _best_developed_base(
+            swings,
+            processed,
+            len(source) - 1,
+            search_floor,
+            cfg,
+            source,
+        )
+        if developed is not None:
+            active, development_event = _start_developing_wave1(
+                developed, next_cycle_id
+            )
+            development_event["values"]["ew_recount_count"] = recount_count
+            events.append(development_event)
+            last_reason_code = "W1_DEVELOPED"
 
     if (
         active is not None
@@ -1363,6 +1615,7 @@ def _origin_protection_active(parent_state: str) -> bool:
     """Point 0 is a hard invalidation only while the motive count is forming."""
 
     return parent_state in {
+        "W1_FORMING",
         "W2_CORRECTION_CONTAINER",
         "W3_FORMING",
         "W4_CORRECTION_CONTAINER",
@@ -3480,11 +3733,15 @@ def _candidate_ending_at(
     search_floor: int,
     cfg: ElliottWaveConfig,
     source: pd.DataFrame | None,
+    locked_start_idx: int | None = None,
 ) -> dict[str, object] | None:
     processed_set = set(processed_indices)
+    candidates: list[dict[str, object]] = []
     for internal_count in cfg.w1_internal_move_counts:
         start_idx = end_idx - internal_count
         if start_idx < 0 or start_idx not in processed_set:
+            continue
+        if locked_start_idx is not None and start_idx != locked_start_idx:
             continue
         start = swings[start_idx]
         end = swings[end_idx]
@@ -3497,19 +3754,26 @@ def _candidate_ending_at(
         if not _anchor_direction_ok(start, bullish, cfg):
             continue
 
+        development = _w1_development_evidence(
+            swings, start_idx, end_idx, bullish, cfg, source
+        )
+        degree_progress = float(development["degree_progress"])
+        degree_ok = bool(development["degree_pass"])
+        time_ok = bool(development["time_pass"])
+        significant_ok = bool(
+            start.degree_significant
+            or start.important_extreme
+            or (search_floor >= 0 and start.position == search_floor)
+        )
+        important_ok = cfg.wave1_start_mode == "Off" or significant_ok
         distance = abs(end.price - start.price)
-        degree_progress = _safe_ratio(distance, start.important_range)
-        degree_ok = np.isfinite(degree_progress) and degree_progress >= cfg.degree_retrace
-        important_ok = cfg.wave1_start_mode == "Off" or start.important_extreme
         atr_ok = cfg.important_atr_multiple <= 0 or (
             np.isfinite(start.atr) and distance >= start.atr * cfg.important_atr_multiple
         )
         oscillator_ok, oscillator_note = _oscillator_evidence(
             swings, start_idx, bullish, cfg
         )
-        if cfg.wave1_start_mode == "Important swing":
-            oscillator_ok = True
-        if not (degree_ok and important_ok and atr_ok and oscillator_ok):
+        if not (degree_ok and time_ok and important_ok and atr_ok):
             continue
         if _candidate_crosses_origin(
             swings, start_idx, end_idx, bullish, source, end.confirmed_position
@@ -3530,13 +3794,18 @@ def _candidate_ending_at(
         )
         pattern = "Leading Diagonal" if "LEADING_DIAGONAL" in subtype else "Motive"
 
-        return {
+        candidates.append({
             "start_idx": start_idx,
             "end_idx": end_idx,
             "bullish": bullish,
             "base_price": start.price,
             "base_position": start.position,
             "degree_progress": degree_progress,
+            "development_position": int(development["development_position"]),
+            "development_index": development["development_index"],
+            "development_level": float(development["development_level"]),
+            "w1_time_ratio": float(development["time_ratio"]),
+            "w1_time_rule": str(development["time_rule"]),
             "internal_count": internal_count,
             "pattern": pattern,
             "subtype": subtype,
@@ -3547,10 +3816,211 @@ def _candidate_ending_at(
             ),
             "note": (
                 f"Wave 1 {subtype} confirmed with {internal_count} internal moves and "
-                f"{degree_progress:.2%} degree progress; {oscillator_note}."
+                f"{degree_progress:.2%} maximum degree development; "
+                f"{development['time_rule']}; {oscillator_note} "
+                f"({'support' if oscillator_ok else 'no oscillator support'})."
             ),
-        }
-    return None
+            "_rank": (
+                int(start.important_extreme),
+                int(oscillator_ok),
+                int(start.degree_significant),
+                internal_count,
+                -start.position,
+            ),
+        })
+    if not candidates:
+        return None
+    selected = max(candidates, key=lambda candidate: tuple(candidate["_rank"]))
+    selected.pop("_rank", None)
+    return selected
+
+
+def _w1_development_evidence(
+    swings: list[_Swing],
+    start_idx: int,
+    end_idx: int,
+    bullish: bool,
+    cfg: ElliottWaveConfig,
+    source: pd.DataFrame | None,
+    through_position: int | None = None,
+) -> dict[str, object]:
+    """Separate the closed 61.8% degree event from the later W1 terminal pivot."""
+
+    start = swings[start_idx]
+    end = swings[end_idx]
+    opposite_price = start.important_high if bullish else start.important_low
+    degree_range = abs(opposite_price - start.price)
+    development_level = start.price + (
+        cfg.degree_retrace * degree_range * (1.0 if bullish else -1.0)
+    )
+    full_level = start.price + degree_range * (1.0 if bullish else -1.0)
+
+    observations: list[tuple[int, object, float, float]] = []
+    if source is not None:
+        last_position = min(
+            end.confirmed_position if through_position is None else through_position,
+            len(source) - 1,
+        )
+        for position in range(start.position + 1, last_position + 1):
+            observations.append(
+                (
+                    position,
+                    source.index[position],
+                    float(source["high"].iloc[position]),
+                    float(source["low"].iloc[position]),
+                )
+            )
+    else:
+        for swing in swings[start_idx + 1 : end_idx + 1]:
+            observations.append(
+                (swing.position, swing.index, swing.price, swing.price)
+            )
+
+    development_position: int | None = None
+    development_index: object = end.confirmed_index
+    full_position: int | None = None
+    maximum_excursion = 0.0
+    for position, index, observed_high, observed_low in observations:
+        excursion = (
+            observed_high - start.price if bullish else start.price - observed_low
+        )
+        maximum_excursion = max(maximum_excursion, excursion)
+        touched = observed_high >= development_level if bullish else observed_low <= development_level
+        touched_full = observed_high >= full_level if bullish else observed_low <= full_level
+        if touched and development_position is None:
+            development_position = position
+            development_index = index
+        if touched_full and full_position is None:
+            full_position = position
+
+    degree_progress = _safe_ratio(maximum_excursion, degree_range)
+    prior_extreme_position = (
+        start.important_high_position if bullish else start.important_low_position
+    )
+    prior_duration = (
+        start.position - int(prior_extreme_position)
+        if prior_extreme_position is not None
+        else 0
+    )
+    touch_duration = (
+        int(development_position) - start.position
+        if development_position is not None
+        else 0
+    )
+    full_duration = (
+        int(full_position) - start.position if full_position is not None else 0
+    )
+    half_time_pass = bool(
+        prior_duration > 0
+        and development_position is not None
+        and abs(touch_duration - 0.50 * prior_duration) <= cfg.time_tolerance_bars
+    )
+    full_time_pass = bool(
+        prior_duration > 0
+        and full_position is not None
+        and abs(full_duration - prior_duration) <= cfg.time_tolerance_bars
+    )
+    time_pass = half_time_pass or full_time_pass
+    time_ratio = _safe_ratio(touch_duration, prior_duration)
+    time_rule = (
+        "W1_TIME_61_8_AT_HALF"
+        if half_time_pass
+        else "W1_TIME_100_AT_EQUAL"
+        if full_time_pass
+        else "W1_TIME_GATE_FAIL"
+    )
+    return {
+        "degree_pass": development_position is not None,
+        "degree_progress": degree_progress,
+        "development_position": (
+            development_position if development_position is not None else end.position
+        ),
+        "development_index": development_index,
+        "development_level": development_level,
+        "time_pass": time_pass,
+        "time_ratio": time_ratio,
+        "time_rule": time_rule,
+    }
+
+
+def _best_developed_base(
+    swings: list[_Swing],
+    processed_indices: list[int],
+    through_position: int,
+    search_floor: int,
+    cfg: ElliottWaveConfig,
+    source: pd.DataFrame | None,
+) -> dict[str, object] | None:
+    """Select Point 0 when development closes, before a W1 terminal exists."""
+
+    if not processed_indices:
+        return None
+    end_idx = processed_indices[-1]
+    candidates: list[dict[str, object]] = []
+    for start_idx in processed_indices:
+        start = swings[start_idx]
+        if start.position < search_floor or start.confirmed_position > through_position:
+            continue
+        significant = bool(
+            cfg.wave1_start_mode == "Off"
+            or start.degree_significant
+            or start.important_extreme
+            or (search_floor >= 0 and start.position == search_floor)
+        )
+        if not significant:
+            continue
+        bullish = start.kind == -1
+        if not _anchor_direction_ok(start, bullish, cfg):
+            continue
+        development = _w1_development_evidence(
+            swings,
+            start_idx,
+            end_idx,
+            bullish,
+            cfg,
+            source,
+            through_position=through_position,
+        )
+        if not (development["degree_pass"] and development["time_pass"]):
+            continue
+        if _candidate_crosses_origin(
+            swings, start_idx, end_idx, bullish, source, through_position
+        ):
+            continue
+        oscillator_support, oscillator_note = _oscillator_evidence(
+            swings, start_idx, bullish, cfg
+        )
+        candidates.append(
+            {
+                "start_idx": start_idx,
+                "end_idx": start_idx,
+                "bullish": bullish,
+                "base_price": start.price,
+                "base_position": start.position,
+                "degree_progress": float(development["degree_progress"]),
+                "development_position": int(development["development_position"]),
+                "development_index": development["development_index"],
+                "development_level": float(development["development_level"]),
+                "w1_time_ratio": float(development["time_ratio"]),
+                "w1_time_rule": str(development["time_rule"]),
+                "internal_count": 0,
+                "pattern": "Motive",
+                "subtype": "W1_DEVELOPED",
+                "internal_pattern": "Awaiting 5/9/13/17/21 terminal",
+                "oscillator_note": oscillator_note,
+                "_rank": (
+                    int(start.important_extreme),
+                    int(oscillator_support),
+                    int(start.degree_significant),
+                    -start.position,
+                ),
+            }
+        )
+    if not candidates:
+        return None
+    selected = max(candidates, key=lambda candidate: tuple(candidate["_rank"]))
+    selected.pop("_rank", None)
+    return selected
 
 
 def _anchor_direction_ok(start: _Swing, bullish: bool, cfg: ElliottWaveConfig) -> bool:
