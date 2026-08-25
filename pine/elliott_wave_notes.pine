@@ -1480,7 +1480,11 @@ f_draw_anchor_fib(anchorIndex, structuralRange) =>
                 if not na(price)
                     opacity = ratio == 0.0 or ratio == 1.0 ? 15 : 35
                     ln = line.new(anchorBar, price, bar_index, price, extend=extend.both, color=color.new(fibLineColor, opacity), width=1, force_overlay=true)
-                    lb = label.new(bar_index, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.normal, force_overlay=true)
+                    // Visible-chart coordinates trigger a recalculation when
+                    // the user pans or zooms. Keep every percentage/price
+                    // label at the current viewport's right edge instead of
+                    // fixing it permanently to the latest data candle.
+                    lb = label.new(chart.right_visible_bar_time, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", xloc=xloc.bar_time, style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.normal, force_overlay=true)
                     array.push(anchorFibLines, ln)
                     array.push(anchorFibLabels, lb)
 
