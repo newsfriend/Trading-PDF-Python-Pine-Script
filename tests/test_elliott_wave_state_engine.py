@@ -294,6 +294,17 @@ class ElliottWaveCandidateStateTests(unittest.TestCase):
             6,
         )
 
+    def test_confirmed_motive_is_archived_before_larger_correction_finishes(self):
+        state = _run_candidate_state(_through_w5(), self.config)
+
+        self.assertEqual(state["active"]["parent_state"], "LARGER_CORRECTION_CONTAINER")
+        self.assertEqual(len(state["completed_cycles"]), 0)
+        self.assertEqual(len(state["confirmed_motives"]), 1)
+        self.assertEqual(
+            list(state["confirmed_motives"][0]["waves"]),
+            ["0", "1", "2", "3", "4", "5"],
+        )
+
     def test_t01_qualified_base_locks_after_five_move_wave1(self):
         state = _run_candidate_state(_confirmed_wave1(), self.config)
 

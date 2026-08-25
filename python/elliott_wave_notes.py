@@ -956,6 +956,7 @@ def _compute_candidate_state(
 
     active = lifecycle["active"]
     archived_cycles = list(lifecycle["completed_cycles"])
+    confirmed_motives = list(lifecycle["confirmed_motives"])
     if (
         active is not None
         and str(active["parent_state"]) == "CORRECTION_CONFIRMED"
@@ -963,8 +964,18 @@ def _compute_candidate_state(
     ):
         archived_slots = cfg.max_completed_cycles - 1
         archived_cycles = archived_cycles[-archived_slots:] if archived_slots else []
-    render_cycles = [*archived_cycles]
+    archived_ids = {int(cycle["cycle_id"]) for cycle in archived_cycles}
+    render_cycles = [
+        cycle
+        for cycle in confirmed_motives
+        if int(cycle["cycle_id"]) not in archived_ids
+    ]
+    render_cycles.extend(archived_cycles)
     if active is not None:
+        active_id = int(active["cycle_id"])
+        render_cycles = [
+            cycle for cycle in render_cycles if int(cycle["cycle_id"]) != active_id
+        ]
         render_cycles.append(active)
 
     for cycle in render_cycles:
@@ -1206,6 +1217,7 @@ def _run_candidate_state(
     events: list[dict[str, object]] = []
     active: dict[str, object] | None = None
     completed_cycles: list[dict[str, object]] = []
+    confirmed_motives: list[dict[str, object]] = []
     next_cycle_id = 0
     search_floor = -1
     recount_count = 0
@@ -1413,6 +1425,14 @@ def _run_candidate_state(
                 transition = _advance_impulse_state(
                     active, swings, swing_index, cfg, source=source
                 )
+                if transition["reason_code"] == "W5_CONFIRMED":
+                    confirmed_motives = [
+                        cycle
+                        for cycle in confirmed_motives
+                        if int(cycle["cycle_id"]) != int(active["cycle_id"])
+                    ]
+                    confirmed_motives.append(_snapshot_completed_cycle(active))
+                    confirmed_motives = confirmed_motives[-cfg.max_completed_cycles :]
                 if alternate and transition["status"] != "CONFIRMED":
                     alternate_count += 1
                     transition["alternate_pattern"] = "Alternate base"
@@ -1522,6 +1542,7 @@ def _run_candidate_state(
     return {
         "active": active,
         "completed_cycles": completed_cycles,
+        "confirmed_motives": confirmed_motives,
         "completed_cycle_total": next_cycle_id,
         "events": events,
         "recount_count": recount_count,

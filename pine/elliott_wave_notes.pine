@@ -1488,16 +1488,34 @@ f_push_history_node(nodeBar, nodePrice, nodeLabel, nodeAbove, cycleId) =>
     array.push(historyAbove, nodeAbove)
     array.push(historyCycleIds, cycleId)
 
+f_remove_history_cycle(cycleId) =>
+    historyIndex = array.size(historyCycleIds) - 1
+    while historyIndex >= 0
+        if array.get(historyCycleIds, historyIndex) == cycleId
+            array.remove(historyBars, historyIndex)
+            array.remove(historyPrices, historyIndex)
+            array.remove(historyLabels, historyIndex)
+            array.remove(historyAbove, historyIndex)
+            array.remove(historyCycleIds, historyIndex)
+        historyIndex -= 1
+
 f_archive_locked_cycle(cycleId, oldestCycleToKeep) =>
+    // Wave 5 is a confirmed motive terminal even while the larger correction
+    // is still developing. Re-archiving replaces that motive-only snapshot
+    // with its later A/B/C (or complex) completion instead of duplicating it.
+    f_remove_history_cycle(cycleId)
     f_push_history_node(lockedBaseBar, lockedBasePrice, "0", lockedBullish ? false : true, cycleId)
     f_push_history_node(lockedW1Bar, lockedW1Price, "1", lockedBullish ? true : false, cycleId)
     f_push_history_node(lockedW2Bar, lockedW2Price, f_parent_correction_label("2", lockedW2Pattern), lockedBullish ? false : true, cycleId)
     f_push_history_node(lockedW3Bar, lockedW3Price, "3", lockedBullish ? true : false, cycleId)
     f_push_history_node(lockedW4Bar, lockedW4Price, f_parent_correction_label("4", lockedW4Pattern), lockedBullish ? false : true, cycleId)
     f_push_history_node(lockedW5Bar, lockedW5Price, "5", lockedBullish ? true : false, cycleId)
-    f_push_history_node(lockedABar, lockedAPrice, f_locked_correction_label(0), lockedBullish ? false : true, cycleId)
-    f_push_history_node(lockedBBar, lockedBPrice, f_locked_correction_label(1), lockedBullish ? true : false, cycleId)
-    f_push_history_node(lockedCBar, lockedCPrice, f_locked_correction_label(2), lockedBullish ? false : true, cycleId)
+    if not na(lockedABar)
+        f_push_history_node(lockedABar, lockedAPrice, f_locked_correction_label(0), lockedBullish ? false : true, cycleId)
+    if not na(lockedBBar)
+        f_push_history_node(lockedBBar, lockedBPrice, f_locked_correction_label(1), lockedBullish ? true : false, cycleId)
+    if not na(lockedCBar)
+        f_push_history_node(lockedCBar, lockedCPrice, f_locked_correction_label(2), lockedBullish ? false : true, cycleId)
     if not na(lockedDBar)
         f_push_history_node(lockedDBar, lockedDPrice, f_locked_correction_label(3), lockedBullish ? true : false, cycleId)
     if not na(lockedEBar)
@@ -2309,6 +2327,8 @@ if changed
                             lastReasonCode := "W5_CONFIRMED"
                             currentNextCondition := "Five-wave impulse locked; classify the larger correction in parallel."
                             developingText := ""
+                            motiveOldestCycleToKeep = math.max(0, completedCycleCount + 1 - maxHistoricalCycles)
+                            f_archive_locked_cycle(completedCycleCount, motiveOldestCycleToKeep)
                             transitionConfirmed := true
                         else
                             candidateState := w3Shortest ? "INVALID" : "FORMING"

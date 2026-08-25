@@ -403,6 +403,14 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.assertIn(token, self.source)
         self.assertIn("if f_bar_drawable(lastInvalidBar)", self.source)
 
+    def test_wave5_is_archived_while_larger_correction_develops(self):
+        self.assertIn("f_remove_history_cycle(cycleId)", self.source)
+        self.assertIn(
+            "f_archive_locked_cycle(completedCycleCount, motiveOldestCycleToKeep)",
+            self.source,
+        )
+        self.assertIn("if not na(lockedABar)", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()
