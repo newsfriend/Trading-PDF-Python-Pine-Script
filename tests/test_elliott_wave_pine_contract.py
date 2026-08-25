@@ -439,6 +439,19 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.source)
 
+    def test_client_gue_overlay_exposes_right_scale_values(self):
+        for token in (
+            'showGueOverlay = input.bool(true',
+            '"BB Upper 20/2"',
+            '"EMA 13"',
+            '"EMA 26"',
+            '"EMA 50"',
+            '"EMA 60"',
+            '"EMA 100"',
+            '"BB Lower 20/2"',
+        ):
+            self.assertIn(token, self.source)
+
     def test_searching_state_keeps_a_non_authoritative_structural_wave_map(self):
         for token in (
             'indicator("Elliott Wave Notes Overlay v4.2 Multi-Cycle"',

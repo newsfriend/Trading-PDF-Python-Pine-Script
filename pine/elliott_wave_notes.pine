@@ -90,6 +90,7 @@ showWave4Internal = input.bool(true, "Show Wave 4 internal A/B/C", group=groupDi
 countDisplayMode = input.string("Validated Anchor", "Count mode", options=["Validated Anchor", "All swings"], group=groupDisplay)
 showTargets = input.bool(true, "Show Wave 5 target zone", group=groupDisplay)
 showAnchorFib = input.bool(true, "Show Important H/L fib guide", group=groupDisplay)
+showGueOverlay = input.bool(true, "Show BB + EMA support overlay", group=groupDisplay, tooltip="Client-reference overlay: Bollinger 20/2 plus EMA 13, 26, 50, 60 and 100. Visible plots also expose their live colored values on the right price scale.")
 dashboardMode = input.string("Hidden", "Dashboard", options=["Compact", "Full", "Hidden"], group=groupDisplay, tooltip="Hidden is the client-reference visual default. Full preserves the nine-route diagnostics; Compact shows only the active route and its neighbors.")
 showTimeTable = input.bool(true, "Show state/evidence table", group=groupDisplay)
 showDegreeDashboard = input.bool(true, "Show degree router", group=groupDisplay)
@@ -1720,8 +1721,15 @@ macdSignalLine = ta.ema(macdLine, macdSignal)
 macdHist = macdLine - macdSignalLine
 bbBasis = ta.sma(close, 20)
 bbDeviation = 2.0 * ta.stdev(close, 20)
+bbUpper = bbBasis + bbDeviation
+bbLower = bbBasis - bbDeviation
 bbWidth = 2.0 * bbDeviation
 bbDirectionalExpansion = bbWidth > bbWidth[1]
+gueEma13 = ta.ema(close, 13)
+gueEma26 = ta.ema(close, 26)
+gueEma50 = ta.ema(close, 50)
+gueEma60 = ta.ema(close, 60)
+gueEma100 = ta.ema(close, 100)
 gmmaFast = (ta.ema(close, 3) + ta.ema(close, 5) + ta.ema(close, 8) + ta.ema(close, 10) + ta.ema(close, 12) + ta.ema(close, 15)) / 6.0
 gmmaSlow = (ta.ema(close, 30) + ta.ema(close, 35) + ta.ema(close, 40) + ta.ema(close, 45) + ta.ema(close, 50) + ta.ema(close, 60)) / 6.0
 volumeRatio = na(volume) ? na : volume / ta.sma(volume, 20)
@@ -2584,3 +2592,13 @@ plot(currentFibValue, "EW PARITY current Fib value", color=color.new(color.gray,
 plot(currentTimeValue, "EW PARITY current time value", color=color.new(color.gray, 100), display=display.data_window)
 plot(currentChannelTarget, "EW channel target", color=color.new(color.blue, 100), display=display.data_window)
 plot(not na(currentConfidence) ? math.min(100.0, currentConfidence + routeConfidenceBonus) : na, "EW confidence", color=color.new(color.gray, 100), display=display.data_window)
+
+// Client-reference GUE overlay. Normal visible plots intentionally expose a
+// colored last value on TradingView's right price scale.
+plot(showGueOverlay ? bbUpper : na, "BB Upper 20/2", color=color.rgb(36, 42, 52), linewidth=1)
+plot(showGueOverlay ? gueEma13 : na, "EMA 13", color=color.rgb(236, 49, 101), linewidth=2)
+plot(showGueOverlay ? gueEma26 : na, "EMA 26", color=color.rgb(77, 179, 102), linewidth=1)
+plot(showGueOverlay ? gueEma50 : na, "EMA 50", color=color.rgb(255, 128, 0), linewidth=1)
+plot(showGueOverlay ? gueEma60 : na, "EMA 60", color=color.rgb(245, 145, 31), linewidth=1)
+plot(showGueOverlay ? gueEma100 : na, "EMA 100", color=color.rgb(220, 39, 95), linewidth=2)
+plot(showGueOverlay ? bbLower : na, "BB Lower 20/2", color=color.rgb(36, 42, 52), linewidth=1)
