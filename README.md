@@ -22,6 +22,7 @@ for the full setup collection is stored in the repository for future development
 | GEO P Momentum signals | Indicator | Signal engine | Implemented |
 | GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
 | Elliott Wave engine | V4 full-cycle foreground overlay with locked history | V4 full-cycle state engine with locked history | Local lifecycle checks pass; XAUUSD 4H chart acceptance pending |
+| Fake Breakout / Breakdown | Indicator with alerts, stops and targets | Signal engine | Implemented; TradingView replay acceptance pending |
 | Remaining PDF setups | - | - | Reference material only |
 
 ## GEO P Momentum
@@ -157,6 +158,8 @@ paths and history.
      entries, exits, stops, targets, and Strategy Tester results.
    - [pine/elliott_wave_notes.pine](pine/elliott_wave_notes.pine) for the
      Elliott Wave visual overlay.
+   - [pine/fake_bo_bd.pine](pine/fake_bo_bd.pine) for standalone FBD/FBO
+     signals, stops, targets and alerts.
 3. Add the script to the chart and configure its inputs.
 4. Use the same inputs in Pine and Python when comparing their output.
 

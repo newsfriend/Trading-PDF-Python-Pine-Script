@@ -1,0 +1,88 @@
+//@version=6
+indicator("Fake Breakout / Breakdown Setup", overlay=true, max_labels_count=500)
+
+groupCore = "Core Setup"
+levelLookback = input.int(20, "Previous high/low lookback", minval=2, group=groupCore)
+confirmOnClose = input.bool(true, "Confirm on candle close", group=groupCore)
+minConfirmations = input.int(3, "Minimum confirmation score", minval=0, maxval=8, group=groupCore)
+requireBandTouch = input.bool(true, "Require Wave Bollinger Band touch", group=groupCore)
+
+groupIndicators = "Checklist Indicators"
+bbLength = input.int(20, "BB length", minval=2, group=groupIndicators)
+bbMult = input.float(2.0, "BB deviation", minval=0.1, step=0.1, group=groupIndicators)
+rsiLength = input.int(14, "RSI length", minval=2, group=groupIndicators)
+stochLength = input.int(14, "Stochastic length", minval=2, group=groupIndicators)
+dmiLength = input.int(14, "DMI length", minval=2, group=groupIndicators)
+volumeLength = input.int(20, "Volume average", minval=2, group=groupIndicators)
+targetLookback = input.int(80, "Major S/R target lookback", minval=10, group=groupIndicators)
+
+groupDisplay = "Display"
+showBands = input.bool(true, "Show Bollinger Bands", group=groupDisplay)
+showLevels = input.bool(true, "Show previous high/low", group=groupDisplay)
+showRisk = input.bool(true, "Show latest stop and target", group=groupDisplay)
+
+previousLow = ta.lowest(low, levelLookback)[1]
+previousHigh = ta.highest(high, levelLookback)[1]
+basis = ta.sma(close, bbLength)
+dev = bbMult * ta.stdev(close, bbLength)
+upper = basis + dev
+lower = basis - dev
+rsiValue = ta.rsi(close, rsiLength)
+[macdLine, macdSignal, _] = ta.macd(close, 12, 26, 9)
+stochK = ta.sma(ta.stoch(close, high, low, stochLength), 3)
+stochD = ta.sma(stochK, 3)
+[diPlus, diMinus, _adx] = ta.dmi(dmiLength, dmiLength)
+avgVolume = ta.sma(volume, volumeLength)
+
+haClose = (open + high + low + close) / 4.0
+haOpen = (open[1] + close[1]) / 2.0
+bullReversal = close > open and close >= open[1] and open <= close[1]
+bearReversal = close < open and open >= close[1] and close <= open[1]
+fbdSweep = low < previousLow and close > previousLow
+fboSweep = high > previousHigh and close < previousHigh
+
+// The manual requires the candle after the sweep to confirm the failure.
+fbdFollowUp = fbdSweep[1] and high > high[1] and close > high[1]
+fboFollowUp = fboSweep[1] and low < low[1] and close < low[1]
+fbdBand = low[1] <= lower[1]
+fboBand = high[1] >= upper[1]
+fbdHa = haClose > haOpen and haClose[1] <= haOpen[1]
+fboHa = haClose < haOpen and haClose[1] >= haOpen[1]
+fbdDmi = diPlus > diMinus or math.abs(diPlus - diMinus) < math.abs(diPlus[1] - diMinus[1])
+fboDmi = diMinus > diPlus or math.abs(diPlus - diMinus) < math.abs(diPlus[1] - diMinus[1])
+fbdScore = (fbdBand ? 1 : 0) + (bullReversal ? 1 : 0) + (fbdHa ? 1 : 0) + (macdLine > macdLine[1] ? 1 : 0) + (rsiValue > 40 ? 1 : 0) + (ta.crossover(stochK, stochD) ? 1 : 0) + (fbdDmi ? 1 : 0) + (volume[1] > avgVolume[1] ? 1 : 0)
+fboScore = (fboBand ? 1 : 0) + (bearReversal ? 1 : 0) + (fboHa ? 1 : 0) + (macdLine < macdLine[1] ? 1 : 0) + (rsiValue < 60 ? 1 : 0) + (ta.crossunder(stochK, stochD) ? 1 : 0) + (fboDmi ? 1 : 0) + (volume[1] > avgVolume[1] ? 1 : 0)
+
+closed = confirmOnClose ? barstate.isconfirmed : true
+fbdBuy = fbdFollowUp and (not requireBandTouch or fbdBand) and fbdScore >= minConfirmations and closed
+fboSell = fboFollowUp and (not requireBandTouch or fboBand) and fboScore >= minConfirmations and closed
+
+longStop = fbdBuy ? previousLow[1] : na
+shortStop = fboSell ? previousHigh[1] : na
+majorResistance = ta.highest(high, targetLookback)[1]
+majorSupport = ta.lowest(low, targetLookback)[1]
+longTarget = fbdBuy ? math.max(majorResistance, close + (close - longStop)) : na
+shortTarget = fboSell ? math.min(majorSupport, close - (shortStop - close)) : na
+
+var float activeStop = na
+var float activeTarget = na
+if fbdBuy
+    activeStop := longStop
+    activeTarget := longTarget
+if fboSell
+    activeStop := shortStop
+    activeTarget := shortTarget
+
+plotshape(fbdBuy, "FBD BUY", text="FBD\nBUY", style=shape.labelup, location=location.belowbar, color=color.lime, textcolor=color.black, size=size.normal)
+plotshape(fboSell, "FBO SELL", text="FBO\nSELL", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.normal)
+u = plot(showBands ? upper : na, "BB Upper", color=color.new(color.black, 20))
+l = plot(showBands ? lower : na, "BB Lower", color=color.new(color.black, 20))
+plot(showBands ? basis : na, "BB Basis", color=color.new(color.gray, 45))
+fill(u, l, color=color.new(color.aqua, 92), title="BB Fill")
+plot(showLevels ? previousHigh : na, "Previous High", color=color.new(color.red, 55), style=plot.style_stepline)
+plot(showLevels ? previousLow : na, "Previous Low", color=color.new(color.green, 55), style=plot.style_stepline)
+plot(showRisk ? activeStop : na, "Active Stop", color=color.red, linewidth=2, style=plot.style_linebr)
+plot(showRisk ? activeTarget : na, "Active Target", color=color.green, linewidth=2, style=plot.style_linebr)
+
+alertcondition(fbdBuy, "FBD BUY", "Fake Breakdown BUY | {{ticker}} | {{interval}}")
+alertcondition(fboSell, "FBO SELL", "Fake Breakout SELL | {{ticker}} | {{interval}}")
