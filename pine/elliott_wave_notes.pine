@@ -8,6 +8,10 @@ indicator("Elliott Wave Notes Overlay v4.2 Multi-Cycle", overlay=true, behind_ch
 max_bars_back(close, 5000)
 max_bars_back(high, 5000)
 max_bars_back(low, 5000)
+// TradingView converts old bar_index drawing coordinates through the time
+// series internally. Replay can therefore need the same explicit buffer even
+// when no source line reads time[offset] directly.
+max_bars_back(time, 5000)
 
 // Source notes:
 // - EW Notes / Chartking material
@@ -16,17 +20,19 @@ max_bars_back(low, 5000)
 // - Time analysis notes
 // - Elliott Wave / NeoWave V4.0 Merged Zero-Knowledge Developer Master
 //
-// Candidate State is the default source-locked engine. Legacy fixed-cycle mode
-// is retained only for comparison and is not an acceptance mode.
+// Candidate State (V4 Full Cycle) is the binding chart-facing engine. It applies
+// the rule gates in the supplied V4 notes before an Elliott label is confirmed.
+// Structural Preview remains available as a diagnostic view, but it is not a
+// V4-confirmed Elliott count; Legacy fixed-cycle is comparison-only.
 
 groupEngine = "Engine / Degree"
-engineMode = input.string("Candidate State (V4 Full Cycle)", "Engine mode", options=["Candidate State (V4 Full Cycle)", "Candidate State (Phase 1)", "Legacy fixed cycle"], group=groupEngine)
+engineMode = input.string("Candidate State (V4 Full Cycle)", "Engine mode", options=["Candidate State (V4 Full Cycle)", "Candidate State (Phase 1)", "Structural Preview (Not V4 Confirmed)", "Legacy fixed cycle"], group=groupEngine)
 degreePreset = input.string("Chartking Day Trading", "Degree preset", options=["Chartking Day Trading", "Hardik 1Y", "Hardik Swing", "Hardik Day Trading", "Manual"], group=groupEngine)
 manualDegreeTimeframe = input.timeframe("D", "Manual Important H/L timeframe", group=groupEngine)
 importantLookbackDays = input.int(144, "Important H/L source bars", minval=10, group=groupEngine, tooltip="Default uses 144 Daily source candles, not 144 local chart candles.")
 baseOscillatorMode = input.string("Extreme or divergence", "Base oscillator rule", options=["Extreme or divergence", "Extreme only", "Divergence only", "Extreme and divergence", "Off"], group=groupEngine)
 showDevelopingCandidates = input.bool(true, "Show developing/alternate status", group=groupEngine)
-showSearchWaveMap = input.bool(true, "Show structural wave map while searching", group=groupEngine, tooltip="Keeps the chart informative when no strict V4 Point 0 is active. These warning-colored historical paths are context only; they do not change or override the authoritative candidate state.")
+showSearchWaveMap = input.bool(false, "Show raw pivot context while searching", group=groupEngine, tooltip="Compatibility setting only. SEARCHING never prints Elliott 0-1-2-3-4-5 or A-B-C labels; labels appear only after their required rule gates pass.")
 degreeSourceTimeframe = degreePreset == "Manual" ? manualDegreeTimeframe : degreePreset == "Hardik 1Y" ? "M" : "D"
 degreeName = degreePreset == "Hardik 1Y" ? "Primary" : degreePreset == "Hardik Swing" ? "Intermediate" : "Major"
 
@@ -38,6 +44,11 @@ minSwingAtrMultiple = input.float(1.5, "Minimum swing ATR multiple", minval=0.0,
 minSwingRangePct = input.float(3.0, "Minimum swing % of Important H/L", minval=0.0, step=0.1, group=groupSwing) / 100.0
 degreePivotAtrMultiple = input.float(3.0, "Degree pivot ATR multiple", minval=0.0, step=0.1, group=groupSwing, tooltip="GUE significance filter. This is stronger than the raw swing filter and prevents minor internal pivots from becoming Point 0.")
 degreePivotRangePct = input.float(10.0, "Degree pivot % of Important H/L", minval=0.0, step=0.1, group=groupSwing) / 100.0
+clientWaveAtrMultiple = input.float(1.0, "Client count minimum wave ATR", minval=0.0, step=0.1, group=groupSwing, tooltip="Minimum parent-wave travel for the connected client count. This filters minor pivots without requiring a 61.8% move across the full 144-day range.")
+clientWaveRangePct = input.float(1.0, "Client count minimum wave % of Important H/L", minval=0.0, step=0.1, group=groupSwing) / 100.0
+clientW2MinRetrace = input.float(10.0, "Client Wave 2 minimum retrace %", minval=0.0, maxval=99.0, step=0.1, group=groupSwing) / 100.0
+clientW3MinMultiple = input.float(61.8, "Client Wave 3 minimum x Wave 1 %", minval=1.0, step=0.1, group=groupSwing) / 100.0
+clientCorrectionMinMultiple = input.float(61.8, "Client C minimum x A %", minval=1.0, step=0.1, group=groupSwing) / 100.0
 showZero = input.bool(true, "Show 0 labels", group=groupSwing)
 
 groupStart = "Wave 1 Start"
@@ -134,6 +145,21 @@ var historyLabels = array.new_string()
 var historyAbove = array.new_bool()
 var historyCycleIds = array.new_int()
 var int completedCycleCount = 0
+// The client acceptance path uses its own locked node store so confirmed
+// parent endpoints never depend on later replacements in the raw-pivot array.
+var clientBars = array.new_int()
+var clientPrices = array.new_float()
+var clientTypes = array.new_int()
+var clientHistoryBars = array.new_int()
+var clientHistoryPrices = array.new_float()
+var clientHistoryTypes = array.new_int()
+var int clientStage = 0
+var bool clientBullish = false
+var string clientReason = "SEARCHING_FOR_STRUCTURAL_POINT_0"
+var int clientCompletedCycles = 0
+var int clientRawCount = 0
+var int clientLastRawBar = na
+var int clientLastRawType = 0
 var table timeTable = table.new(position.top_right, 2, 7, border_width=1)
 var table degreeTable = table.new(position.bottom_right, 5, 10, border_width=1)
 
@@ -292,12 +318,222 @@ f_clear_drawings() =>
     array.clear(anchorFibLines)
     array.clear(anchorFibLabels)
     array.clear(channelLines)
+
+f_is_client_mode() =>
+    engineMode == "Structural Preview (Not V4 Confirmed)"
+
+f_client_reset(pivotBar, pivotPrice, pivotType) =>
+    array.clear(clientBars)
+    array.clear(clientPrices)
+    array.clear(clientTypes)
+    array.push(clientBars, pivotBar)
+    array.push(clientPrices, pivotPrice)
+    array.push(clientTypes, pivotType)
+
+f_client_append(pivotBar, pivotPrice, pivotType) =>
+    array.push(clientBars, pivotBar)
+    array.push(clientPrices, pivotPrice)
+    array.push(clientTypes, pivotType)
+
+f_client_price(nodeIndex) =>
+    array.size(clientPrices) > nodeIndex ? array.get(clientPrices, nodeIndex) : float(na)
+
+f_client_archive() =>
+    if array.size(clientBars) == 9
+        for clientIndex = 0 to 8
+            array.push(clientHistoryBars, array.get(clientBars, clientIndex))
+            array.push(clientHistoryPrices, array.get(clientPrices, clientIndex))
+            array.push(clientHistoryTypes, array.get(clientTypes, clientIndex))
+        while array.size(clientHistoryBars) > maxHistoricalCycles * 9
+            array.shift(clientHistoryBars)
+            array.shift(clientHistoryPrices)
+            array.shift(clientHistoryTypes)
+
+// Consume one confirmed structural pivot. This is deliberately a parent-wave
+// state machine, not modulo numbering: every transition checks the preceding
+// Elliott structure before a label is promoted.
+f_client_process(stage, bullish, pivotBar, pivotPrice, pivotType, pivotAtr, pivotImportantRange) =>
+    nextStage = stage
+    nextBullish = bullish
+    reason = clientReason
+    cycleCompleted = false
+    minAtrMove = not na(pivotAtr) ? pivotAtr * clientWaveAtrMultiple : 0.0
+    minRangeMove = not na(pivotImportantRange) ? pivotImportantRange * clientWaveRangePct : 0.0
+    minimumMove = math.max(minAtrMove, minRangeMove)
+    if array.size(clientBars) == 0 or stage == 0
+        f_client_reset(pivotBar, pivotPrice, pivotType)
+        nextStage := 1
+        reason := "POINT_0_CANDIDATE"
+    else
+        p0 = array.get(clientPrices, 0)
+        t0 = array.get(clientTypes, 0)
+        if stage == 1
+            if pivotType == t0
+                moreExtremeBase = pivotType == 1 ? pivotPrice > p0 : pivotPrice < p0
+                if moreExtremeBase
+                    array.set(clientBars, 0, pivotBar)
+                    array.set(clientPrices, 0, pivotPrice)
+                    reason := "POINT_0_IMPROVED"
+            else
+                wave1Length = math.abs(pivotPrice - p0)
+                if wave1Length >= minimumMove
+                    f_client_append(pivotBar, pivotPrice, pivotType)
+                    nextBullish := pivotPrice > p0
+                    nextStage := 2
+                    reason := "W1_CONFIRMED_STRUCTURAL"
+                else
+                    f_client_reset(pivotBar, pivotPrice, pivotType)
+                    nextStage := 1
+                    reason := "W1_TOO_SMALL_REBASE"
+        else if stage == 2
+            p1 = array.get(clientPrices, 1)
+            expectedType = t0
+            if pivotType == expectedType
+                crossedOrigin = nextBullish ? pivotPrice <= p0 : pivotPrice >= p0
+                retrace = math.abs(p1 - pivotPrice) / math.max(math.abs(p1 - p0), syminfo.mintick)
+                if crossedOrigin
+                    f_client_reset(pivotBar, pivotPrice, pivotType)
+                    nextStage := 1
+                    reason := "W2_ORIGIN_BREAK_RECOUNT"
+                else if retrace >= clientW2MinRetrace and retrace < 1.0
+                    f_client_append(pivotBar, pivotPrice, pivotType)
+                    nextStage := 3
+                    reason := "W2_CONFIRMED_STRUCTURAL"
+                else
+                    reason := "W2_RETRACE_PENDING"
+        else if stage == 3
+            p1 = array.get(clientPrices, 1)
+            p2 = array.get(clientPrices, 2)
+            t1 = array.get(clientTypes, 1)
+            if pivotType == t1
+                wave1Length = math.abs(p1 - p0)
+                wave3Length = math.abs(pivotPrice - p2)
+                exceedsW1 = nextBullish ? pivotPrice > p1 : pivotPrice < p1
+                if exceedsW1 and wave3Length >= clientW3MinMultiple * wave1Length
+                    f_client_append(pivotBar, pivotPrice, pivotType)
+                    nextStage := 4
+                    reason := "W3_CONFIRMED_STRUCTURAL"
+                else
+                    reason := "W3_EXTENSION_PENDING"
+            else if pivotType == t0
+                protected = nextBullish ? pivotPrice > p0 : pivotPrice < p0
+                improvesW2 = nextBullish ? pivotPrice < p2 : pivotPrice > p2
+                if not protected
+                    f_client_reset(pivotBar, pivotPrice, pivotType)
+                    nextStage := 1
+                    nextBullish := false
+                    reason := "W2_ORIGIN_BREAK_RECOUNT"
+                else if improvesW2
+                    array.set(clientBars, 2, pivotBar)
+                    array.set(clientPrices, 2, pivotPrice)
+                    reason := "W2_TERMINAL_IMPROVED"
+        else if stage == 4
+            p1 = array.get(clientPrices, 1)
+            p2 = array.get(clientPrices, 2)
+            p3 = array.get(clientPrices, 3)
+            if pivotType == t0
+                originProtected = nextBullish ? pivotPrice > p0 : pivotPrice < p0
+                normalNoOverlap = nextBullish ? pivotPrice > p1 : pivotPrice < p1
+                diagonalProtected = nextBullish ? pivotPrice > p2 : pivotPrice < p2
+                baseTo3 = math.abs(p3 - p0)
+                retrace4 = math.abs(p3 - pivotPrice) / math.max(baseTo3, syminfo.mintick)
+                if not originProtected
+                    f_client_reset(pivotBar, pivotPrice, pivotType)
+                    nextStage := 1
+                    reason := "W4_ORIGIN_BREAK_RECOUNT"
+                else if (normalNoOverlap or diagonalProtected) and retrace4 >= 0.10 and retrace4 <= 0.70
+                    f_client_append(pivotBar, pivotPrice, pivotType)
+                    nextStage := 5
+                    reason := normalNoOverlap ? "W4_CONFIRMED_STRUCTURAL" : "W4_DIAGONAL_OVERLAP"
+                else
+                    reason := "W4_CORRECTION_PENDING"
+        else if stage == 5
+            p1 = array.get(clientPrices, 1)
+            p3 = array.get(clientPrices, 3)
+            p4 = array.get(clientPrices, 4)
+            t1 = array.get(clientTypes, 1)
+            if pivotType == t1
+                wave1Length = math.abs(p1 - p0)
+                wave5Length = math.abs(pivotPrice - p4)
+                normalFive = nextBullish ? pivotPrice > p3 : pivotPrice < p3
+                movesWithTrend = nextBullish ? pivotPrice > p4 : pivotPrice < p4
+                truncatedFive = movesWithTrend and wave5Length >= 0.382 * wave1Length
+                if normalFive or truncatedFive
+                    f_client_append(pivotBar, pivotPrice, pivotType)
+                    nextStage := 6
+                    reason := normalFive ? "W5_CONFIRMED_STRUCTURAL" : "W5_TRUNCATED_STRUCTURAL"
+                else
+                    reason := "W5_TERMINAL_PENDING"
+            else if pivotType == t0
+                p2 = array.get(clientPrices, 2)
+                improvesW4 = nextBullish ? pivotPrice < p4 and pivotPrice > p2 : pivotPrice > p4 and pivotPrice < p2
+                if improvesW4
+                    array.set(clientBars, 4, pivotBar)
+                    array.set(clientPrices, 4, pivotPrice)
+                    reason := "W4_TERMINAL_IMPROVED"
+        else if stage == 6
+            p5 = array.get(clientPrices, 5)
+            if pivotType == t0 and math.abs(p5 - pivotPrice) >= 0.50 * minimumMove
+                f_client_append(pivotBar, pivotPrice, pivotType)
+                nextStage := 7
+                reason := "A_CONFIRMED_STRUCTURAL"
+            else
+                reason := "A_LEG_PENDING"
+        else if stage == 7
+            p5 = array.get(clientPrices, 5)
+            pA = array.get(clientPrices, 6)
+            t1 = array.get(clientTypes, 1)
+            if pivotType == t1
+                bRetrace = math.abs(pivotPrice - pA) / math.max(math.abs(p5 - pA), syminfo.mintick)
+                if bRetrace >= 0.10 and bRetrace <= 1.618
+                    f_client_append(pivotBar, pivotPrice, pivotType)
+                    nextStage := 8
+                    reason := "B_CONFIRMED_STRUCTURAL"
+                else
+                    reason := "B_PATTERN_PENDING"
+        else if stage == 8
+            p5 = array.get(clientPrices, 5)
+            pA = array.get(clientPrices, 6)
+            pB = array.get(clientPrices, 7)
+            if pivotType == t0
+                aLength = math.abs(p5 - pA)
+                cLength = math.abs(pB - pivotPrice)
+                cMultiple = cLength / math.max(aLength, syminfo.mintick)
+                beyondA = nextBullish ? pivotPrice < pA : pivotPrice > pA
+                if beyondA or cMultiple >= clientCorrectionMinMultiple
+                    f_client_append(pivotBar, pivotPrice, pivotType)
+                    f_client_archive()
+                    cycleCompleted := true
+                    cBar = array.get(clientBars, 8)
+                    cPrice = array.get(clientPrices, 8)
+                    cType = array.get(clientTypes, 8)
+                    f_client_reset(cBar, cPrice, cType)
+                    nextStage := 1
+                    nextBullish := false
+                    reason := "IMPULSE_AND_ABC_CONFIRMED"
+                else
+                    reason := "C_TERMINAL_PENDING"
+    [nextStage, nextBullish, reason, cycleCompleted]
 f_previous_same_type_index(index, pivotType) =>
     found = -1
     if index > 0
         for j = 0 to index - 1
             checkIndex = index - 1 - j
             if found == -1 and array.get(swingTypes, checkIndex) == pivotType
+                found := checkIndex
+    found
+
+// The 144-day Important H/L window supplies context and significance. Wave-1
+// development price/time is anchored to the nearest preceding significant
+// opposite swing of this degree, not to the full rolling-window extreme.
+f_previous_degree_opposite_index(index, pivotType) =>
+    found = -1
+    if index > 0
+        for j = 0 to index - 1
+            checkIndex = index - 1 - j
+            oppositeType = array.get(swingTypes, checkIndex) == -pivotType
+            significant = array.get(swingDegreeSignificant, checkIndex) or array.get(swingImportantExtreme, checkIndex)
+            if found == -1 and oppositeType and significant
                 found := checkIndex
     found
 
@@ -374,6 +610,49 @@ f_eval_diagonal(startIndex, endIndex, diagonalKind) =>
         reason := confirmed ? "DIAGONAL_CONFIRMED" : not overlap or not wave2BoundaryPass ? "DIAGONAL_OVERLAP_FAIL" : not wedge ? "DIAGONAL_WEDGE_FAIL" : leading ? "LEADING_DIAGONAL_FIB_FAIL" : "ENDING_DIAGONAL_DIVERGENCE_FAIL"
     [confirmed, subtype, reason, divergence, internalPattern]
 
+// Validate the five parent legs of an impulse instead of treating the number
+// of retained pivots as proof of an Elliott structure. Extended motive legs
+// consume 5/9/13/17 pivots; corrective separators consume 1/3/7/11 pivots.
+// The selected parent endpoints must still satisfy the hard Elliott geometry.
+f_motive_structure_pass(startIndex, endIndex, bullish, allowOverlap, allowTruncation) =>
+    found = false
+    totalCount = endIndex - startIndex
+    if startIndex >= 0 and totalCount >= 5
+        for w1Option = 0 to 4
+            w1Count = w1Option == 0 ? 1 : w1Option == 1 ? 5 : w1Option == 2 ? 9 : w1Option == 3 ? 13 : 17
+            for w2Option = 0 to 3
+                w2Count = w2Option == 0 ? 1 : w2Option == 1 ? 3 : w2Option == 2 ? 7 : 11
+                for w3Option = 0 to 4
+                    w3Count = w3Option == 0 ? 1 : w3Option == 1 ? 5 : w3Option == 2 ? 9 : w3Option == 3 ? 13 : 17
+                    for w4Option = 0 to 3
+                        w4Count = w4Option == 0 ? 1 : w4Option == 1 ? 3 : w4Option == 2 ? 7 : 11
+                        w5Count = totalCount - w1Count - w2Count - w3Count - w4Count
+                        w5Allowed = w5Count == 1 or w5Count == 5 or w5Count == 9 or w5Count == 13 or w5Count == 17
+                        if not found and w5Allowed
+                            i1 = startIndex + w1Count
+                            i2 = i1 + w2Count
+                            i3 = i2 + w3Count
+                            i4 = i3 + w4Count
+                            i5 = i4 + w5Count
+                            if i5 == endIndex
+                                p0 = array.get(swingPrices, startIndex)
+                                p1 = array.get(swingPrices, i1)
+                                p2 = array.get(swingPrices, i2)
+                                p3 = array.get(swingPrices, i3)
+                                p4 = array.get(swingPrices, i4)
+                                p5 = array.get(swingPrices, i5)
+                                directionPass = bullish ? p1 > p0 and p3 > p1 and p5 > p1 : p1 < p0 and p3 < p1 and p5 < p1
+                                w2Protected = bullish ? p2 > p0 : p2 < p0
+                                w4Protected = allowOverlap or (bullish ? p4 > p1 : p4 < p1)
+                                w5Progress = bullish ? p5 > p3 : p5 < p3
+                                truncationPass = allowTruncation and (bullish ? p5 > p1 : p5 < p1)
+                                w1Length = math.abs(p1 - p0)
+                                w3Length = math.abs(p3 - p2)
+                                w5Length = math.abs(p5 - p4)
+                                w3NotShortest = not (w3Length < w1Length and w3Length < w5Length)
+                                found := directionPass and w2Protected and w4Protected and (w5Progress or truncationPass) and w3NotShortest
+    found
+
 f_candidate_for_count(endIndex, internalCount) =>
     startIndex = endIndex - internalCount
     valid = false
@@ -400,7 +679,8 @@ f_candidate_for_count(endIndex, internalCount) =>
         degreeSignificant = array.get(swingDegreeSignificant, startIndex)
         importantOk = wave1StartMode == "Off" or degreeSignificant or importantExtreme or (searchFloorBar >= 0 and startBar == searchFloorBar)
         importantRange = array.get(swingImportantRange, startIndex)
-        oppositePrice = bullish ? array.get(swingImportantHigh, startIndex) : array.get(swingImportantLow, startIndex)
+        precedingOppositeIndex = f_previous_degree_opposite_index(startIndex, startType)
+        oppositePrice = precedingOppositeIndex >= 0 ? array.get(swingPrices, precedingOppositeIndex) : bullish ? array.get(swingImportantHigh, startIndex) : array.get(swingImportantLow, startIndex)
         degreeRange = math.abs(oppositePrice - startPrice)
         developmentLevel := startPrice + degreeRetrace * degreeRange * (bullish ? 1.0 : -1.0)
         fullLevel = startPrice + degreeRange * (bullish ? 1.0 : -1.0)
@@ -421,7 +701,7 @@ f_candidate_for_count(endIndex, internalCount) =>
                     fullTouchBar := checkBar
         progress := degreeRange > 0 ? maxExcursion / degreeRange : na
         degreeOk = not na(developmentBar)
-        importantOppositeBar = bullish ? array.get(swingImportantHighBar, startIndex) : array.get(swingImportantLowBar, startIndex)
+        importantOppositeBar = precedingOppositeIndex >= 0 ? array.get(swingBars, precedingOppositeIndex) : bullish ? array.get(swingImportantHighBar, startIndex) : array.get(swingImportantLowBar, startIndex)
         priorDuration = not na(importantOppositeBar) ? startBar - importantOppositeBar : 0
         touchDuration = not na(developmentBar) ? developmentBar - startBar : 0
         fullDuration = not na(fullTouchBar) ? fullTouchBar - startBar : 0
@@ -436,8 +716,9 @@ f_candidate_for_count(endIndex, internalCount) =>
         [oscillatorEvidence, extremeOk, divergenceOk] = f_candidate_oscillator(startIndex, bullish)
         originOk = not f_candidate_crosses_origin(startIndex, endIndex, bullish)
         floorOk = startBar >= searchFloorBar
-        valid := (bullish or bearish) and directionOk and importantOk and degreeOk and timePass and atrOk and originOk and floorOk
         [leadingConfirmed, leadingSubtype, leadingReason, leadingDivergence, leadingPattern] = f_eval_diagonal(startIndex, endIndex, "leading")
+        impulseConfirmed = f_motive_structure_pass(startIndex, endIndex, bullish, false, false)
+        valid := (bullish or bearish) and directionOk and importantOk and degreeOk and timePass and atrOk and originOk and floorOk and (impulseConfirmed or leadingConfirmed)
         candidateSubtype := leadingConfirmed ? leadingSubtype : candidateSubtype
         candidateRank := (importantExtreme ? 100000 : 0) + (oscillatorEvidence ? 10000 : 0) + (degreeSignificant ? 1000 : 0) + internalCount * 10 - startIndex
         note := "W1 " + candidateSubtype + " | " + str.tostring(internalCount) + " moves | max degree " + str.tostring(progress * 100.0, "#.##") + "% | " + timeRule + " | oscillator support " + (oscillatorEvidence ? "yes" : "no")
@@ -491,7 +772,8 @@ f_developed_base_for_index(startIndex) =>
         importantExtreme = array.get(swingImportantExtreme, startIndex)
         degreeSignificant = array.get(swingDegreeSignificant, startIndex)
         significant = wave1StartMode == "Off" or degreeSignificant or importantExtreme or (searchFloorBar >= 0 and startBar == searchFloorBar)
-        oppositePrice = bullish ? array.get(swingImportantHigh, startIndex) : array.get(swingImportantLow, startIndex)
+        precedingOppositeIndex = f_previous_degree_opposite_index(startIndex, startType)
+        oppositePrice = precedingOppositeIndex >= 0 ? array.get(swingPrices, precedingOppositeIndex) : bullish ? array.get(swingImportantHigh, startIndex) : array.get(swingImportantLow, startIndex)
         degreeRange = math.abs(oppositePrice - startPrice)
         developmentLevel := startPrice + degreeRetrace * degreeRange * (bullish ? 1.0 : -1.0)
         fullLevel = startPrice + degreeRange * (bullish ? 1.0 : -1.0)
@@ -514,7 +796,7 @@ f_developed_base_for_index(startIndex) =>
                 if fullTouch and na(fullTouchBar)
                     fullTouchBar := checkBar
         progress := degreeRange > 0 ? maxExcursion / degreeRange : na
-        importantOppositeBar = bullish ? array.get(swingImportantHighBar, startIndex) : array.get(swingImportantLowBar, startIndex)
+        importantOppositeBar = precedingOppositeIndex >= 0 ? array.get(swingBars, precedingOppositeIndex) : bullish ? array.get(swingImportantHighBar, startIndex) : array.get(swingImportantLowBar, startIndex)
         priorDuration = not na(importantOppositeBar) ? startBar - importantOppositeBar : 0
         touchDuration = not na(developmentBar) ? developmentBar - startBar : 0
         fullDuration = not na(fullTouchBar) ? fullTouchBar - startBar : 0
@@ -555,7 +837,7 @@ f_find_developed_base() =>
     [foundStart, foundBullish, foundDevelopmentBar, foundDevelopmentLevel, foundProgress, foundTimeRatio, foundTimeRule]
 
 f_is_candidate_mode() =>
-    engineMode != "Legacy fixed cycle"
+    engineMode == "Candidate State (V4 Full Cycle)" or engineMode == "Candidate State (Phase 1)"
 
 f_impulse_count(optionIndex) =>
     optionIndex == 0 ? 5 : optionIndex == 1 ? 9 : optionIndex == 2 ? 13 : optionIndex == 3 ? 17 : 21
@@ -684,18 +966,21 @@ f_eval_simple_correction(startIndex, endIndex) =>
                         bTimePass = math.abs(bDuration - aDuration) <= timeToleranceBars or math.abs(bDuration - 2.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 5.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 10.0 * aDuration) <= timeToleranceBars
                         cTimePass = math.abs(cDuration - 0.25 * abDuration) <= timeToleranceBars or math.abs(cDuration - 0.50 * abDuration) <= timeToleranceBars or math.abs(cDuration - abDuration) <= timeToleranceBars
                         zigPricePass = not na(bRatio) and bRatio >= 0.01 and bRatio <= 0.618 and not na(cVsA) and cVsA >= 0.618 and cVsA <= 4.618
+                        aBullish = array.get(swingPrices, aIndex) > array.get(swingPrices, startIndex)
+                        cBullish = array.get(swingPrices, endIndex) > array.get(swingPrices, bIndex)
+                        [aDiagonalConfirmed, aDiagonalSubtype, aDiagonalReason, aDiagonalDivergence, aDiagonalPattern] = f_eval_diagonal(startIndex, aIndex, "leading")
                         [cDiagonalConfirmed, cDiagonalSubtype, cDiagonalReason, cDiagonalDivergence, cDiagonalPattern] = f_eval_diagonal(bIndex, endIndex, "ending")
-                        cStructurePass = cCount != 15 or cDiagonalConfirmed
+                        aStructurePass = f_motive_structure_pass(startIndex, aIndex, aBullish, false, false) or aDiagonalConfirmed
+                        cStructurePass = f_motive_structure_pass(bIndex, endIndex, cBullish, false, false) or cDiagonalConfirmed
                         sawBTimeFailure := sawBTimeFailure or (zigPricePass and not bTimePass)
                         sawCTimeFailure := sawCTimeFailure or (zigPricePass and bTimePass and not cTimePass)
-                        zigPass = zigPricePass and cStructurePass and bTimePass and cTimePass
+                        zigPass = zigPricePass and aStructurePass and cStructurePass and bTimePass and cTimePass
                         if zigPass
                             if not confirmed
                                 confirmed := true
                                 primary := "Zig-Zag"
                                 selectedSubtype := cVsA <= 1.618 ? "ZIG_ZAG_NORMAL" : "ZIG_ZAG_ELONGATED"
                                 selectedBRatio := bRatio
-                                [aDiagonalConfirmed, aDiagonalSubtype, aDiagonalReason, aDiagonalDivergence, aDiagonalPattern] = f_eval_diagonal(startIndex, aIndex, "leading")
                                 internalPattern := (aDiagonalConfirmed ? "LD " : "") + str.tostring(aCount) + "-" + str.tostring(bCount) + "-" + str.tostring(cCount) + (cDiagonalConfirmed ? " ED" : "")
                                 selectedACount := aCount
                                 selectedBCount := bCount
@@ -720,8 +1005,9 @@ f_eval_simple_correction(startIndex, endIndex) =>
                         bTimePass = math.abs(bDuration - aDuration) <= timeToleranceBars or math.abs(bDuration - 2.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 5.0 * aDuration) <= timeToleranceBars or math.abs(bDuration - 10.0 * aDuration) <= timeToleranceBars
                         cTimePass = math.abs(cDuration - 0.25 * abDuration) <= timeToleranceBars or math.abs(cDuration - 0.50 * abDuration) <= timeToleranceBars or math.abs(cDuration - abDuration) <= timeToleranceBars
                         flatPricePass = not na(bRatio) and bRatio >= flatBMinRetrace and bRatio <= flatBMaxRetrace and not na(cVsA) and cVsA >= 0.618 and cVsA <= 2.618
+                        cBullish = array.get(swingPrices, endIndex) > array.get(swingPrices, bIndex)
                         [cDiagonalConfirmed, cDiagonalSubtype, cDiagonalReason, cDiagonalDivergence, cDiagonalPattern] = f_eval_diagonal(bIndex, endIndex, "ending")
-                        cStructurePass = cCount != 15 or cDiagonalConfirmed
+                        cStructurePass = f_motive_structure_pass(bIndex, endIndex, cBullish, false, false) or cDiagonalConfirmed
                         sawBTimeFailure := sawBTimeFailure or (flatPricePass and not bTimePass)
                         sawCTimeFailure := sawCTimeFailure or (flatPricePass and bTimePass and not cTimePass)
                         flatPass = flatPricePass and cStructurePass and bTimePass and cTimePass
@@ -1507,11 +1793,12 @@ f_draw_wave5_targets(cycleStart) =>
             array.push(targetLines, maxLine)
 
 f_draw_locked_fib() =>
-    importantRange = lockedImportantHigh - lockedImportantLow
-    if showAnchorFib and baseLocked and f_bar_drawable(lockedBaseBar) and not na(importantRange) and importantRange > 0
+    fibTerminalPrice = not na(lockedW1Price) ? lockedW1Price : lockedW1DevelopmentLevel
+    lockedWaveRange = math.abs(fibTerminalPrice - lockedBasePrice)
+    if showAnchorFib and baseLocked and f_bar_drawable(lockedBaseBar) and not na(lockedWaveRange) and lockedWaveRange > 0
         for fibIndex = 0 to 9
             ratio = f_fib_ratio(fibIndex)
-            price = lockedBullish ? lockedImportantLow + importantRange * ratio : lockedImportantHigh - importantRange * ratio
+            price = lockedBullish ? lockedBasePrice + lockedWaveRange * ratio : lockedBasePrice - lockedWaveRange * ratio
             opacity = ratio == 0.0 or ratio == 1.0 ? 35 : 55
             ln = line.new(lockedBaseBar, price, bar_index, price, extend=extend.right, color=color.new(fibLineColor, opacity), width=1, force_overlay=true)
             lb = label.new(bar_index, price, text=f_fib_text(fibIndex) + " (" + str.tostring(price, format.mintick) + ")", style=label.style_label_left, yloc=yloc.price, color=color.new(color.white, 100), textcolor=fibLineColor, size=size.tiny, force_overlay=true)
@@ -1563,6 +1850,51 @@ f_archive_locked_cycle(cycleId, oldestCycleToKeep) =>
         array.shift(historyLabels)
         array.shift(historyAbove)
         array.shift(historyCycleIds)
+
+f_client_node_text(nodeIndex) =>
+    nodeIndex == 0 ? "0" : nodeIndex <= 5 ? str.tostring(nodeIndex) : nodeIndex == 6 ? "(A)" : nodeIndex == 7 ? "(B)" : "(C)"
+
+f_client_node_color(nodeIndex) =>
+    nodeIndex == 0 ? color.rgb(45, 48, 58) : nodeIndex <= 5 ? (nodeIndex == 2 or nodeIndex == 4 ? color.rgb(235, 62, 71) : color.rgb(255, 145, 0)) : color.rgb(38, 145, 126)
+
+f_redraw_client() =>
+    f_clear_drawings()
+    historicalCount = array.size(clientHistoryBars)
+    if historicalCount > 0
+        for historyIndex = 0 to historicalCount - 1
+            nodeOffset = historyIndex % 9
+            nodeBar = array.get(clientHistoryBars, historyIndex)
+            nodePrice = array.get(clientHistoryPrices, historyIndex)
+            nodeType = array.get(clientHistoryTypes, historyIndex)
+            if nodeOffset > 0
+                priorBar = array.get(clientHistoryBars, historyIndex - 1)
+                priorPrice = array.get(clientHistoryPrices, historyIndex - 1)
+                if f_bar_drawable(priorBar) and f_bar_drawable(nodeBar)
+                    segmentColor = nodeOffset <= 5 ? impulseLineColor : correctionLineColor
+                    historyLine = line.new(priorBar, priorPrice, nodeBar, nodePrice, color=segmentColor, width=3, force_overlay=true)
+                    array.push(drawnLines, historyLine)
+            if f_bar_drawable(nodeBar) and (showZero or nodeOffset != 0)
+                nodeStyle = nodeType == 1 ? label.style_label_down : label.style_label_up
+                historyLabel = label.new(nodeBar, nodePrice, text=f_client_node_text(nodeOffset), style=nodeStyle, yloc=yloc.price, color=f_client_node_color(nodeOffset), textcolor=labelTextColor, size=f_label_size(), tooltip="CONFIRMED client structural cycle. The connected 1-5 impulse and A-B-C correction passed their parent gates.", force_overlay=true)
+                array.push(drawnLabels, historyLabel)
+    currentCount = array.size(clientBars)
+    if currentCount > 0
+        for currentIndex = 0 to currentCount - 1
+            nodeBar = array.get(clientBars, currentIndex)
+            nodePrice = array.get(clientPrices, currentIndex)
+            nodeType = array.get(clientTypes, currentIndex)
+            if currentIndex > 0
+                priorBar = array.get(clientBars, currentIndex - 1)
+                priorPrice = array.get(clientPrices, currentIndex - 1)
+                if f_bar_drawable(priorBar) and f_bar_drawable(nodeBar)
+                    segmentColor = currentIndex <= 5 ? impulseLineColor : correctionLineColor
+                    currentLine = line.new(priorBar, priorPrice, nodeBar, nodePrice, color=segmentColor, width=3, force_overlay=true)
+                    array.push(drawnLines, currentLine)
+            duplicatesTerminal = currentIndex == 0 and historicalCount > 0 and array.get(clientHistoryBars, historicalCount - 1) == nodeBar
+            if not duplicatesTerminal and f_bar_drawable(nodeBar) and (showZero or currentIndex != 0)
+                nodeStyle = nodeType == 1 ? label.style_label_down : label.style_label_up
+                currentLabel = label.new(nodeBar, nodePrice, text=f_client_node_text(currentIndex), style=nodeStyle, yloc=yloc.price, color=f_client_node_color(currentIndex), textcolor=labelTextColor, size=f_label_size(), tooltip="Client structural count | " + clientReason, force_overlay=true)
+                array.push(drawnLabels, currentLabel)
 
 f_redraw_history() =>
     historyCount = array.size(historyBars)
@@ -1957,7 +2289,52 @@ if originBroken or retentionInvalidated or baseOutsideDegreeWindow
     f_redraw_candidate()
 
 if changed
-    if f_is_candidate_mode()
+    if f_is_client_mode()
+        latestClientIndex = array.size(swingBars) - 1
+        if latestClientIndex >= 0
+            latestClientBar = array.get(swingBars, latestClientIndex)
+            latestClientPrice = array.get(swingPrices, latestClientIndex)
+            latestClientType = array.get(swingTypes, latestClientIndex)
+            latestClientAtr = array.get(swingAtr, latestClientIndex)
+            latestClientRange = array.get(swingImportantRange, latestClientIndex)
+            newStructuralPivot = array.size(swingBars) > clientRawCount or latestClientType != clientLastRawType
+            if newStructuralPivot
+                [nextClientStage, nextClientBullish, nextClientReason, clientCycleCompleted] = f_client_process(clientStage, clientBullish, latestClientBar, latestClientPrice, latestClientType, latestClientAtr, latestClientRange)
+                clientStage := nextClientStage
+                clientBullish := nextClientBullish
+                clientReason := nextClientReason
+                if clientCycleCompleted
+                    clientCompletedCycles += 1
+                clientRawCount := array.size(swingBars)
+                clientLastRawBar := latestClientBar
+                clientLastRawType := latestClientType
+            else
+                // A same-side raw pivot may be replaced by a later, more
+                // extreme confirmed pivot before an opposite structural swing
+                // arrives. Wave 2 is special: if that revision crosses Point 0,
+                // it invalidates the impulse instead of silently moving a
+                // confirmed label through the origin.
+                currentClientCount = array.size(clientBars)
+                if currentClientCount > 0 and array.get(clientBars, currentClientCount - 1) == clientLastRawBar
+                    revisedW2CrossedOrigin = clientStage == 3 and (clientBullish ? latestClientPrice <= array.get(clientPrices, 0) : latestClientPrice >= array.get(clientPrices, 0))
+                    if revisedW2CrossedOrigin
+                        f_client_reset(latestClientBar, latestClientPrice, latestClientType)
+                        clientStage := 1
+                        clientBullish := false
+                        clientReason := "W2_ORIGIN_BREAK_RECOUNT"
+                    else
+                        array.set(clientBars, currentClientCount - 1, latestClientBar)
+                        array.set(clientPrices, currentClientCount - 1, latestClientPrice)
+                        array.set(clientTypes, currentClientCount - 1, latestClientType)
+                clientLastRawBar := latestClientBar
+            candidateState := clientStage > 1 ? "CONFIRMED" : "FORMING"
+            lastReasonCode := clientReason
+            engineStage := clientStage == 1 ? "CLIENT_W1_FORMING" : clientStage == 2 ? "CLIENT_W2_FORMING" : clientStage == 3 ? "CLIENT_W3_FORMING" : clientStage == 4 ? "CLIENT_W4_FORMING" : clientStage == 5 ? "CLIENT_W5_FORMING" : clientStage == 6 ? "CLIENT_A_FORMING" : clientStage == 7 ? "CLIENT_B_FORMING" : "CLIENT_C_FORMING"
+            primaryPattern := clientStage <= 5 ? "Connected 1-2-3-4-5" : "A-B-C correction"
+            currentInternalCount := math.max(0, clientStage - 1)
+            currentNextCondition := clientStage == 1 ? "Need structural Wave 1." : clientStage == 2 ? "Need protected Wave 2." : clientStage == 3 ? "Need Wave 3 beyond Wave 1." : clientStage == 4 ? "Need valid Wave 4 correction." : clientStage == 5 ? "Need normal or truncated Wave 5." : clientStage == 6 ? "Need correction Wave A." : clientStage == 7 ? "Need correction Wave B." : "Need terminal correction Wave C."
+            f_redraw_client()
+    else if f_is_candidate_mode()
         // A confirmed correction terminal is also eligible to become the next
         // cycle's Point 0. Archive the locked endpoints before releasing the
         // scalar active state; the historical arrays are never rebuilt from
@@ -2185,7 +2562,7 @@ if changed
                     if w2Index >= 0 and latestIndex > w2Index
                         internalCount = latestIndex - w2Index
                         correctSide = latestType == (lockedBullish ? 1 : -1)
-                        internalValid = f_is_impulse_count(internalCount) and correctSide
+                        internalValid = f_is_impulse_count(internalCount) and correctSide and f_motive_structure_pass(w2Index, latestIndex, lockedBullish, false, false)
                         extension = f_ratio(math.abs(latestPrice - lockedW2Price), math.abs(lockedW1Price - lockedBasePrice))
                         terminalOverlap = f_internal_four_overlaps_one(w2Index, latestIndex, lockedBullish)
                         trending = internalValid and not na(extension) and extension >= wave3MinExtension
@@ -2336,7 +2713,7 @@ if changed
                         correctSide = latestType == (lockedBullish ? 1 : -1)
                         [endingConfirmed, endingSubtype, endingReason, endingDivergence, endingPattern] = f_eval_diagonal(w4Index, latestIndex, "ending")
                         endingConfirmed := endingConfirmed and correctSide
-                        internalValid = (f_is_impulse_count(internalCount) and correctSide) or endingConfirmed
+                        internalValid = (f_is_impulse_count(internalCount) and correctSide and f_motive_structure_pass(w4Index, latestIndex, lockedBullish, false, true)) or endingConfirmed
                         projection = f_ratio(math.abs(latestPrice - lockedW4Price), math.abs(lockedW3Price - lockedW4Price))
                         w1Length = math.abs(lockedW1Price - lockedBasePrice)
                         w3Length = math.abs(lockedW3Price - lockedW2Price)
@@ -2553,11 +2930,65 @@ if changed
     else
         f_redraw(true, true, true, false)
 
+// A same-side raw-pivot revision in an older script version could move a
+// confirmed endpoint through Point 0. Detect impossible active geometry and
+// rebuild only the client-facing count from the retained confirmed swings.
+// This releases stale off-chart structures without touching the strict V4 or
+// FBD/FBO state, and keeps the rebuild deterministic on the same pivot prefix.
+clientDirectionBroken = false
+clientW2OriginBroken = false
+if f_is_client_mode() and array.size(clientPrices) >= 2
+    invariantP0 = array.get(clientPrices, 0)
+    invariantP1 = array.get(clientPrices, 1)
+    clientDirectionBroken := clientBullish ? invariantP1 <= invariantP0 : invariantP1 >= invariantP0
+    if array.size(clientPrices) >= 3
+        invariantP2 = array.get(clientPrices, 2)
+        clientW2OriginBroken := clientBullish ? invariantP2 <= invariantP0 : invariantP2 >= invariantP0
+
+if barstate.islast and f_is_client_mode() and (clientDirectionBroken or clientW2OriginBroken)
+    array.clear(clientBars)
+    array.clear(clientPrices)
+    array.clear(clientTypes)
+    array.clear(clientHistoryBars)
+    array.clear(clientHistoryPrices)
+    array.clear(clientHistoryTypes)
+    clientStage := 0
+    clientBullish := false
+    clientReason := "REBUILDING_INVALID_CLIENT_STRUCTURE"
+    clientCompletedCycles := 0
+    retainedClientCount = array.size(swingBars)
+    if retainedClientCount > 0
+        for replayClientIndex = 0 to retainedClientCount - 1
+            replayClientBar = array.get(swingBars, replayClientIndex)
+            replayClientPrice = array.get(swingPrices, replayClientIndex)
+            replayClientType = array.get(swingTypes, replayClientIndex)
+            replayClientAtr = array.get(swingAtr, replayClientIndex)
+            replayClientRange = array.get(swingImportantRange, replayClientIndex)
+            [replayClientStage, replayClientBullish, replayClientReason, replayClientCompleted] = f_client_process(clientStage, clientBullish, replayClientBar, replayClientPrice, replayClientType, replayClientAtr, replayClientRange)
+            clientStage := replayClientStage
+            clientBullish := replayClientBullish
+            clientReason := replayClientReason
+            if replayClientCompleted
+                clientCompletedCycles += 1
+        clientRawCount := retainedClientCount
+        clientLastRawBar := array.get(swingBars, retainedClientCount - 1)
+        clientLastRawType := array.get(swingTypes, retainedClientCount - 1)
+
 // SEARCHING can be reached on a closed bar that did not create a new pivot.
 // Refresh the contextual map on the last bar as well so the overlay never
 // remains blank merely because the final lifecycle transition was pivot-free.
-if barstate.islast and f_is_candidate_mode() and showSearchWaveMap and candidateState == "SEARCHING" and completedCycleCount == 0
-    f_redraw(true, true, false, true)
+if barstate.islast and f_is_client_mode()
+    f_redraw_client()
+
+// Keep the authoritative locked/forming path visible even when the last bar
+// does not create a new confirmed pivot (for example after a live recalculation
+// or settings change).
+if barstate.islast and f_is_candidate_mode()
+    f_redraw_candidate()
+
+// V4 rule: SEARCHING has no Elliott label. In particular, never turn raw pivot
+// indices into a repeating 0-1-2-3-4-5/A-B-C sequence. The compatibility input
+// above remains so saved chart settings still load, but it cannot bypass gates.
 
 degreeDashboardVisible = dashboardMode != "Hidden" and showDegreeDashboard
 if degreeDashboardVisible and barstate.islast
@@ -2605,20 +3036,24 @@ alertcondition(stateChanged and str.contains(hpSignalState, "HP SELL"), "EW HP S
 alertcondition(stateChanged and str.length(fbdCandidateState) > 0, "EW FBD FBO CANDIDATE", "EW FBD_FBO_CANDIDATE | {{ticker}} | chart {{interval}}")
 
 parityTerminalCorrectionCode = lockedCorrectionPattern == "W-X-Y-XX-Z" ? 15 : lockedCorrectionPattern == "W-X-Y" ? 13 : not na(lockedEBar) ? 10 : 8
-parityConfirmedLabelCode = not baseLocked ? -1 : engineStage == "CORRECTION_CONFIRMED" ? parityTerminalCorrectionCode : not na(lockedW5Bar) ? 5 : not na(lockedW4Bar) ? 4 : not na(lockedW3Bar) ? 3 : not na(lockedW2Bar) ? 2 : 1
+clientParityCount = array.size(clientPrices)
+clientParityBaseLocked = clientParityCount > 0
+clientParityLabelCode = clientReason == "IMPULSE_AND_ABC_CONFIRMED" ? 8 : clientParityCount > 0 ? clientParityCount - 1 : -1
+clientParityParentCode = math.min(7, math.max(0, clientStage))
+parityConfirmedLabelCode = f_is_client_mode() ? clientParityLabelCode : not baseLocked ? -1 : engineStage == "CORRECTION_CONFIRMED" ? parityTerminalCorrectionCode : not na(lockedW5Bar) ? 5 : not na(lockedW4Bar) ? 4 : not na(lockedW3Bar) ? 3 : not na(lockedW2Bar) ? 2 : 1
 plot(stateChanged ? 1 : 0, "EW PARITY confirmation event", color=color.new(color.gray, 100), display=display.data_window)
 plot(f_candidate_state_code(candidateState), "EW PARITY candidate state code", color=color.new(color.gray, 100), display=display.data_window)
-plot(f_parent_state_code(engineStage), "EW PARITY parent state code", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? clientParityParentCode : f_parent_state_code(engineStage), "EW PARITY parent state code", color=color.new(color.gray, 100), display=display.data_window)
 plot(parityConfirmedLabelCode, "EW PARITY confirmed label code", color=color.new(color.gray, 100), display=display.data_window)
-plot(completedCycleCount, "EW PARITY completed cycle count", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? clientCompletedCycles : completedCycleCount, "EW PARITY completed cycle count", color=color.new(color.gray, 100), display=display.data_window)
 plot(recountCount, "EW PARITY recount count", color=color.new(color.gray, 100), display=display.data_window)
-plot(baseLocked ? 1 : 0, "EW PARITY base locked", color=color.new(color.gray, 100), display=display.data_window)
-plot(baseLocked ? lockedBasePrice : na, "EW PARITY Point 0 price", color=color.new(color.gray, 100), display=display.data_window)
-plot(baseLocked ? lockedW1Price : na, "EW PARITY Wave 1 price", color=color.new(color.gray, 100), display=display.data_window)
-plot(baseLocked and not na(lockedW2Bar) ? lockedW2Price : na, "EW PARITY Wave 2 price", color=color.new(color.gray, 100), display=display.data_window)
-plot(baseLocked and not na(lockedW3Bar) ? lockedW3Price : na, "EW PARITY Wave 3 price", color=color.new(color.gray, 100), display=display.data_window)
-plot(baseLocked and not na(lockedW4Bar) ? lockedW4Price : na, "EW PARITY Wave 4 price", color=color.new(color.gray, 100), display=display.data_window)
-plot(baseLocked and not na(lockedW5Bar) ? lockedW5Price : na, "EW PARITY Wave 5 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? (clientParityBaseLocked ? 1 : 0) : (baseLocked ? 1 : 0), "EW PARITY base locked", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? (clientParityBaseLocked ? f_client_price(0) : na) : (baseLocked ? lockedBasePrice : na), "EW PARITY Point 0 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? f_client_price(1) : (baseLocked ? lockedW1Price : na), "EW PARITY Wave 1 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? f_client_price(2) : (baseLocked and not na(lockedW2Bar) ? lockedW2Price : na), "EW PARITY Wave 2 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? f_client_price(3) : (baseLocked and not na(lockedW3Bar) ? lockedW3Price : na), "EW PARITY Wave 3 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? f_client_price(4) : (baseLocked and not na(lockedW4Bar) ? lockedW4Price : na), "EW PARITY Wave 4 price", color=color.new(color.gray, 100), display=display.data_window)
+plot(f_is_client_mode() ? f_client_price(5) : (baseLocked and not na(lockedW5Bar) ? lockedW5Price : na), "EW PARITY Wave 5 price", color=color.new(color.gray, 100), display=display.data_window)
 plot(currentFibValue, "EW PARITY current Fib value", color=color.new(color.gray, 100), display=display.data_window)
 plot(currentTimeValue, "EW PARITY current time value", color=color.new(color.gray, 100), display=display.data_window)
 plot(currentChannelTarget, "EW channel target", color=color.new(color.blue, 100), display=display.data_window)

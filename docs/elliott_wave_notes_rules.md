@@ -18,11 +18,19 @@ references; they are not executable project instructions.
 Where the documents disagree, V4.0 controls, followed by its embedded V3.3
 resolutions and acceptance fixtures.
 
-## Default Candidate Engine
+## Default Chart-Facing Engine
 
-Pine and Python now default to a persistent, source-locked candidate engine.
-Confirmed raw pivots are market-structure inputs; they do not automatically
-become the next Elliott label.
+Pine defaults to `Candidate State (V4 Full Cycle)`, the binding source-locked
+lifecycle. `SEARCHING` has no Elliott label. FORMING endpoints are visibly
+distinct, and confirmed `0-1-2-3-4-5` / correction labels appear only after the
+required development, time, internal-structure, price, and invalidation gates
+pass. Confirmed endpoints and completed cycles are locked.
+
+`Structural Preview (Not V4 Confirmed)` is retained only for diagnostic visual
+comparison with the supplied screenshots. It is not an acceptance mode.
+`Legacy fixed cycle` is also comparison-only.
+
+## Exhaustive Candidate Engine
 
 The implemented parent-state path is:
 
@@ -30,13 +38,18 @@ The implemented parent-state path is:
 
 Point 0 first requires a significant degree swing, Important High/Low context,
 an intact origin, and the mandatory closed-bar time/development event: either
-61.8% development near half the preceding Important H/L duration or 100%
+61.8% development near half the preceding significant opposite-swing duration or 100%
 development near equal duration, with the fixed tolerance. That event locks
 Point 0 and opens `W1_FORMING`; it is not the Wave-1 endpoint. Wave 1 locks only
 after a later permitted 5/9/13/17/21-move terminal confirms. MACD/RSI evidence
 ranks and explains candidates but is not a hard Point-0 gate. Confirmed event
 times and main-wave bars/prices are copied into locked state so later candles
 cannot move them.
+
+The 144-day source window provides context and significance; it is not the
+Point-0-to-Wave-1 measurement range. Development and its time ratio use the
+nearest preceding significant opposite swing. Once Wave 1 locks, the visible
+Fib ladder is anchored to the actual Point-0-to-Wave-1 price range.
 
 The core impulse implementation then provides:
 

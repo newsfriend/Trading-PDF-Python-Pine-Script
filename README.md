@@ -21,7 +21,7 @@ for the full setup collection is stored in the repository for future development
 | --- | --- | --- | --- |
 | GEO P Momentum signals | Indicator | Signal engine | Implemented |
 | GEO P Momentum entries and exits | Strategy | Simple backtester | Implemented |
-| Elliott Wave engine | V4 full-cycle foreground overlay with locked history | V4 full-cycle state engine with locked history | Local lifecycle checks pass; XAUUSD 4H chart acceptance pending |
+| Elliott Wave engine | V4 full-cycle candidate overlay plus explicitly non-confirmed structural preview | V4 full-cycle reference plus structural-preview regression engine | V4 default compiles on XAUUSD 4H; replay/parity acceptance remains |
 | Fake Breakout / Breakdown | Indicator with alerts, stops and targets | Signal engine | Implemented; TradingView replay acceptance pending |
 | Remaining PDF setups | - | - | Reference material only |
 
@@ -37,6 +37,9 @@ trendline or range breakout. Its confirmation logic includes:
 - Optional EMA 50 and support/resistance filters.
 - Configurable `Fast`, `Balanced`, and `Strict PDF` signal modes.
 - Stops, target levels, TradingView alerts, and a Python backtest helper.
+- The standalone FBD/FBO backtester follows the close-confirmed chart
+  lifecycle, removes expired risk levels, and resolves same-candle stop/target
+  ambiguity conservatively in favour of the stop.
 
 The default `PDF Auto` timeframe mapping follows the supplied Tide/Wave
 hierarchy. For example, on a 15-minute execution chart it uses 4H Tide and 1H
@@ -49,8 +52,13 @@ are documented in [docs/geo_p_momentum_pdf_rules.md](docs/geo_p_momentum_pdf_rul
 ## Elliott Wave Notes
 
 The Elliott Wave implementation is a separate analytical overlay; it does not
-generate GEO P Momentum BUY or SELL signals. Its source-locked candidate engine
-keeps the dashboard above chart candles and now provides:
+generate GEO P Momentum BUY or SELL signals. Pine defaults to `Candidate State
+(V4 Full Cycle)`, the binding notes-driven lifecycle. `SEARCHING` prints no
+Elliott labels; confirmed numbers and letters are drawn only after their parent
+rule gates pass. The former chart shortcut remains available only as
+`Structural Preview (Not V4 Confirmed)`.
+
+The overlay provides:
 
 - Confirmed and ATR-filtered swing detection.
 - Separate raw pivots and main Elliott labels.
@@ -103,10 +111,10 @@ keeps the dashboard above chart candles and now provides:
 The local Pine/Python implementation now includes the V4 lifecycle and locked
 historical-cycle behavior. The source-conflicted, instrument-specific Wave-5
 extension remains explicitly blocked instead of being generalized. Final
-acceptance still requires TradingView compilation and XAUUSD 4H replay against
-the supplied reference charts, followed by candle-for-candle parity and
-performance evidence. The old modulo-style sequence is available only as
-`Legacy fixed cycle` comparison mode.
+acceptance still requires XAUUSD 4H replay against client-approved endpoints,
+followed by candle-for-candle parity and performance evidence. TradingView
+compilation and a live XAUUSD 4H lifecycle check pass. The old modulo-style
+sequence is available only as `Legacy fixed cycle` comparison mode.
 
 See [docs/elliott_wave_notes_rules.md](docs/elliott_wave_notes_rules.md) for the
 implemented rules and assumptions.

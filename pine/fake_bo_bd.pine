@@ -66,12 +66,29 @@ shortTarget = fboSell ? math.min(majorSupport, close - (shortStop - close)) : na
 
 var float activeStop = na
 var float activeTarget = na
+var int activeDirection = 0
+var int activeEntryBar = na
+
+// Retire a completed setup before accepting a new one.  The entry bar is
+// excluded because its range occurred before the close-confirmed entry.
+longFinished = activeDirection == 1 and bar_index > activeEntryBar and (low <= activeStop or high >= activeTarget)
+shortFinished = activeDirection == -1 and bar_index > activeEntryBar and (high >= activeStop or low <= activeTarget)
+if longFinished or shortFinished
+    activeStop := na
+    activeTarget := na
+    activeDirection := 0
+    activeEntryBar := na
+
 if fbdBuy
     activeStop := longStop
     activeTarget := longTarget
+    activeDirection := 1
+    activeEntryBar := bar_index
 if fboSell
     activeStop := shortStop
     activeTarget := shortTarget
+    activeDirection := -1
+    activeEntryBar := bar_index
 
 plotshape(fbdBuy, "FBD BUY", text="FBD\nBUY", style=shape.labelup, location=location.belowbar, color=color.lime, textcolor=color.black, size=size.normal)
 plotshape(fboSell, "FBO SELL", text="FBO\nSELL", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.normal)

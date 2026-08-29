@@ -114,6 +114,90 @@ def compute_fake_break_signals(
     return out
 
 
+def backtest_fake_break_signals(signals: pd.DataFrame) -> pd.DataFrame:
+    """Backtest one active FBD/FBO setup at a time.
+
+    Entries occur at the confirmation-bar close. Stops and targets become
+    eligible on the following candle, matching the close-confirmed Pine
+    indicator. If both are touched by one candle, the stop is chosen so the
+    result does not assume a favourable intrabar path.
+    """
+    required = {
+        "high", "low", "close", "fbd_buy", "fbo_sell",
+        "long_stop", "long_target", "short_stop", "short_target",
+    }
+    missing = required - set(signals.columns)
+    if missing:
+        raise ValueError(f"Missing signal columns: {sorted(missing)}")
+
+    trades: list[dict[str, object]] = []
+    active: dict[str, object] | None = None
+    positions = list(signals.index)
+
+    for offset, index in enumerate(positions):
+        row = signals.loc[index]
+        if active is not None and offset > int(active["entry_offset"]):
+            side = str(active["side"])
+            stop = float(active["stop"])
+            target = float(active["target"])
+            stop_hit = float(row["low"]) <= stop if side == "long" else float(row["high"]) >= stop
+            target_hit = float(row["high"]) >= target if side == "long" else float(row["low"]) <= target
+            if stop_hit or target_hit:
+                outcome = "stop" if stop_hit else "target"
+                exit_price = stop if stop_hit else target
+                entry_price = float(active["entry_price"])
+                pnl = exit_price - entry_price if side == "long" else entry_price - exit_price
+                trades.append({
+                    "side": side,
+                    "entry_index": active["entry_index"],
+                    "exit_index": index,
+                    "entry_price": entry_price,
+                    "stop": stop,
+                    "target": target,
+                    "exit_price": exit_price,
+                    "outcome": outcome,
+                    "pnl": pnl,
+                    "bars_held": offset - int(active["entry_offset"]),
+                })
+                active = None
+
+        if active is None:
+            if bool(row["fbd_buy"]):
+                active = _new_trade(row, index, offset, "long")
+            elif bool(row["fbo_sell"]):
+                active = _new_trade(row, index, offset, "short")
+
+    columns = [
+        "side", "entry_index", "exit_index", "entry_price", "stop",
+        "target", "exit_price", "outcome", "pnl", "bars_held",
+    ]
+    return pd.DataFrame(trades, columns=columns)
+
+
+def _new_trade(
+    row: pd.Series, index: object, offset: int, side: str
+) -> dict[str, object] | None:
+    stop_key, target_key = (
+        ("long_stop", "long_target") if side == "long"
+        else ("short_stop", "short_target")
+    )
+    entry, stop, target = float(row["close"]), float(row[stop_key]), float(row[target_key])
+    valid = (
+        np.isfinite(entry) and np.isfinite(stop) and np.isfinite(target)
+        and ((stop < entry < target) if side == "long" else (target < entry < stop))
+    )
+    if not valid:
+        return None
+    return {
+        "side": side,
+        "entry_index": index,
+        "entry_offset": offset,
+        "entry_price": entry,
+        "stop": stop,
+        "target": target,
+    }
+
+
 def _cross(left: pd.Series, right: pd.Series) -> pd.Series:
     return (left > right) & (left.shift(1) <= right.shift(1))
 

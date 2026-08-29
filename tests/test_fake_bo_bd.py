@@ -3,7 +3,11 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from python.fake_bo_bd import FakeBreakConfig, compute_fake_break_signals
+from python.fake_bo_bd import (
+    FakeBreakConfig,
+    backtest_fake_break_signals,
+    compute_fake_break_signals,
+)
 
 
 class FakeBreakTests(unittest.TestCase):
@@ -43,6 +47,40 @@ class FakeBreakTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing OHLCV"):
             compute_fake_break_signals(pd.DataFrame({"close": [1, 2]}))
 
+    def test_backtest_uses_next_bar_and_closes_at_target(self):
+        signals = pd.DataFrame({
+            "high": [101.0, 106.0],
+            "low": [99.0, 99.5],
+            "close": [100.0, 105.0],
+            "fbd_buy": [True, False],
+            "fbo_sell": [False, False],
+            "long_stop": [98.0, np.nan],
+            "long_target": [105.0, np.nan],
+            "short_stop": [np.nan, np.nan],
+            "short_target": [np.nan, np.nan],
+        })
+        trades = backtest_fake_break_signals(signals)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades.loc[0, "outcome"], "target")
+        self.assertEqual(trades.loc[0, "bars_held"], 1)
+        self.assertAlmostEqual(trades.loc[0, "pnl"], 5.0)
+
+    def test_backtest_is_conservative_when_stop_and_target_share_bar(self):
+        signals = pd.DataFrame({
+            "high": [101.0, 106.0],
+            "low": [99.0, 97.0],
+            "close": [100.0, 100.0],
+            "fbd_buy": [True, False],
+            "fbo_sell": [False, False],
+            "long_stop": [98.0, np.nan],
+            "long_target": [105.0, np.nan],
+            "short_stop": [np.nan, np.nan],
+            "short_target": [np.nan, np.nan],
+        })
+        trades = backtest_fake_break_signals(signals)
+        self.assertEqual(trades.loc[0, "outcome"], "stop")
+        self.assertAlmostEqual(trades.loc[0, "pnl"], -2.0)
+
 
 class FakeBreakPineContractTests(unittest.TestCase):
     @classmethod
@@ -57,6 +95,8 @@ class FakeBreakPineContractTests(unittest.TestCase):
             "fboSweep[1] and low < low[1] and close < low[1]",
             'alertcondition(fbdBuy, "FBD BUY"',
             'alertcondition(fboSell, "FBO SELL"',
+            "longFinished = activeDirection == 1",
+            "shortFinished = activeDirection == -1",
         ):
             self.assertIn(token, self.source)
 

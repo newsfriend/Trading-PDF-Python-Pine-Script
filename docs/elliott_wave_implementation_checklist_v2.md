@@ -19,7 +19,7 @@ The older manuals and chart images remain supporting references.
 | Requirement | Status | Evidence |
 | --- | --- | --- |
 | Keep confirmed raw pivots separate from main Elliott pivots | DONE | `ew_raw_*` and `ew_*` are separate in Python; Pine retains raw swing arrays while drawing only locked main labels. |
-| Replace modulo counting with a candidate lifecycle | DONE | Candidate State is the default; Legacy fixed-cycle mode is retained only for comparison. |
+| Replace modulo counting with a candidate lifecycle | DONE | `Candidate State (V4 Full Cycle)` is the chart-facing default. `SEARCHING` cannot draw sequential Elliott labels; Structural Preview and Legacy fixed-cycle are explicitly non-acceptance modes. |
 | Qualify Point 0 using a significant degree swing, Important H/L context, degree progress and time | DONE | The default structural significance gate uses the stronger ATR/range filter. Oscillator evidence supports candidate ranking but does not reject a structurally valid origin. |
 | Lock Point 0 at the closed 61.8% development event | DONE | `W1_DEVELOPED` locks Point 0 when the 61.8%-at-half-time or 100%-at-equal-time rule passes. This event is prefix-invariant and is not invented later at the Wave-1 terminal. |
 | Require a later 5/9/13/17/21-move Wave 1 terminal | DONE | `W1_FORMING` retains only `0` and `1?`; the Wave-1 endpoint is locked separately after its permitted terminal pivot confirms. |
@@ -41,7 +41,7 @@ The older manuals and chart images remain supporting references.
 | Wave 3 trending/terminal classifier | DONE IN CODE | 5/9/13/17/21 internals, trending/terminal ranges, 2700% maximum, time, momentum, overlap, and lower-degree W4 target-zone support are implemented. |
 | Wave 4 correction container and W5 gate | DONE IN CODE | All supported correction families, Base-to-W3 retracement, overlap, time, thrust/channel evidence, and the no-premature-W5 gate are implemented. |
 | Wave 5 normal/truncated/extended/ED classifier | DONE IN CODE | Normal, double-extension truncated, instrument-gated extension, and ending-diagonal paths include time, divergence, W3-not-shortest, channel/cluster, and FBD/FBO support. C23 extensions are enabled for stocks, futures, forex, commodities and crypto; indices remain disabled by default with an explicit advanced override. |
-| Persistent confirmed labels 0-5 | DONE for supported core paths | Pine and Python lock each main wave only after its parent-state rules pass; later raw pivots remain developing candidates. While strict V4 is searching with no retained confirmed cycle, Pine displays a warning-colored structural history map for chart context; it never changes the authoritative state or exports. The client-reference default hides diagnostic tables so the connected wave paths remain readable. |
+| Persistent confirmed labels 0-5 | DONE for supported core paths | Pine and Python lock each main wave only after its parent-state rules pass; later raw pivots remain developing candidates. Strict V4 draws no Elliott labels while `SEARCHING`; the former repeating structural map was removed because it could be mistaken for a confirmed count. |
 | Retain completed historical cycles | DONE IN CODE | The current forming count and latest three completed cycles are rendered independently. A locked terminal correction can seed the next Point 0, and archive-prefix regression tests prevent later pivots from moving completed endpoints. |
 | Phase 2 regression cases T02-T13 | DONE in Python | Tests cover normal/microscopic W2, Flat B at/above 111%, trending/terminal/extended W3, W4 completion/overlap gating, and normal/truncated W5. Pine has matching static contract tests and compiles in TradingView; reference-range replay still remains. |
 
@@ -98,3 +98,62 @@ active count when its endpoint is evicted or Point 0 leaves the configured
 degree context. The corrected script compiled and ran without an error, then
 reported `SEARCHING_FOR_BASE` because no current candidate passed all mandatory
 V4 gates. This is a valid diagnostic state, not final visual acceptance.
+
+## 2026-08-27 Client Structural Rebuild
+
+The client rejected the sparse strict-mode chart because it did not visibly
+produce coherent `1-2-3-4-5` impulses followed by `A-B-C`. The new default
+`Client Swing Structure` engine separates that parent chart count from the
+exhaustive lower-degree research lifecycle. It uses confirmed filtered pivots,
+hard structural transitions instead of modulo numbering, locked completed
+cycles, and a mirrored executable Python regression engine. TradingView
+accepted the clean 2,942-line revised Pine source through compilation. A
+reference-scale replay test now covers two consecutive XAUUSD-style cycles and
+proves that terminal `C` is reused as the following `0`, producing one connected
+`0-1-2-3-4-5-A-B-C-1-2-3-4-5-A-B-C` path without interleaved parent labels.
+Final visual replacement and screenshot acceptance remain pending because the
+Basic chart already uses both available indicator slots.
+
+## 2026-08-28 XAUUSD 4H Live Acceptance
+
+The obsolete Elliott instance was replaced with the clean rebuilt source on
+`CAPITALCOM:XAUUSD`, 4-hour. TradingView compiled and calculated the script
+without a compiler or runtime error, with `Client Swing Structure` confirmed as
+the active default engine.
+
+The first live pass exposed an impossible stale state: bearish Wave 2 had been
+moved above Point 0 by a same-side raw-pivot replacement, leaving the active
+count on an old off-chart structure. The state machine now treats that revision
+as `W2_ORIGIN_BREAK_RECOUNT` and includes a deterministic retained-swing rebuild
+for impossible legacy geometry. After redeployment, the active parity prices
+moved to the current market structure (`0=4697.04`, `1=4605.21`, `2=4673.68`).
+
+The zoomed July-August acceptance frame visibly contains a connected orange
+`0-1-2-3-4-5`, a connected teal `(A)-(B)-(C)`, and the next live orange
+`0-1-2`. The FBD/FBO overlay was hidden only for the clean visual inspection and
+was restored immediately afterward. This satisfies the chart-facing sequence
+and continuity complaint; CSV parity remains unavailable on the TradingView
+Basic plan and is not used as evidence for this visual acceptance result.
+
+## 2026-08-28 V4 Re-Audit and Corrective Deployment
+
+The two preceding structural-preview sections are historical findings, not the
+current acceptance claim. A fresh audit against the controlling V4 notes found
+that the preview did not implement all mandatory internal/time/correction gates
+and therefore could not remain the default.
+
+The chart now defaults to `Candidate State (V4 Full Cycle)`. The misleading
+SEARCHING fallback that converted pivot indices into repeating
+`0-1-2-3-4-5/A-B-C` labels was removed. Waves 1, 3, and 5 now require actual
+parent impulse geometry in addition to a permitted internal move count, and
+Zig-Zag A/C motive legs receive the same structure validation.
+
+The Point-0 development anchor was also corrected: the 144-day window supplies
+context/significance, while the nearest preceding significant opposite swing
+supplies the 61.8%/100% price and time measurement. On live XAUUSD 4H this
+changed strict V4 from an empty SEARCHING state to a locked Point 0 and confirmed
+Wave 1 with Wave 2 forming. The last-bar redraw keeps that authoritative path
+visible, and the Fib ladder now uses the actual locked Point-0-to-Wave-1 range
+instead of the oversized 144-day range. Pine compilation/runtime passed after
+these corrections; full replay, exported parity, and client endpoint approval
+remain Milestone-3 acceptance items.

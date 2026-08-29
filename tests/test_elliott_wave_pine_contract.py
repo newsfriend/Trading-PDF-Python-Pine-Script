@@ -10,11 +10,37 @@ class ElliottWavePineContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.source = PINE_FILE.read_text(encoding="utf-8")
 
-    def test_candidate_state_is_the_default_engine(self):
+    def test_v4_full_cycle_is_the_default_engine(self):
         self.assertIn(
             'input.string("Candidate State (V4 Full Cycle)", "Engine mode"',
             self.source,
         )
+
+    def test_structural_preview_is_explicitly_not_v4_confirmed(self):
+        for token in (
+            'engineMode == "Structural Preview (Not V4 Confirmed)"',
+            '"W2_ORIGIN_BREAK_RECOUNT"',
+            '"W3_CONFIRMED_STRUCTURAL"',
+            '"W4_DIAGONAL_OVERLAP"',
+            '"W5_TRUNCATED_STRUCTURAL"',
+            '"A_CONFIRMED_STRUCTURAL"',
+            '"B_CONFIRMED_STRUCTURAL"',
+            '"IMPULSE_AND_ABC_CONFIRMED"',
+            'f_client_archive()',
+            'f_redraw_client()',
+        ):
+            self.assertIn(token, self.source)
+        self.assertNotIn('f_client_node_text(nodeIndex) =>\n    str.tostring(nodeIndex % 9)', self.source)
+
+    def test_client_engine_rebuilds_impossible_stale_origin_geometry(self):
+        for token in (
+            "clientDirectionBroken",
+            "clientW2OriginBroken",
+            '"REBUILDING_INVALID_CLIENT_STRUCTURE"',
+            "for replayClientIndex = 0 to retainedClientCount - 1",
+            "array.clear(clientHistoryBars)",
+        ):
+            self.assertIn(token, self.source)
 
     def test_v4_point0_and_w1_are_separate_lifecycle_states(self):
         for token in (
@@ -28,6 +54,39 @@ class ElliottWavePineContractTests(unittest.TestCase):
             'if not na(lockedW1Bar)',
         ):
             self.assertIn(token, self.source)
+
+    def test_internal_motive_counts_require_elliott_geometry(self):
+        for token in (
+            "f_motive_structure_pass(startIndex, endIndex, bullish, allowOverlap, allowTruncation)",
+            "w2Protected",
+            "w4Protected",
+            "w3NotShortest",
+            "impulseConfirmed or leadingConfirmed",
+            "f_motive_structure_pass(w2Index, latestIndex, lockedBullish, false, false)",
+            "f_motive_structure_pass(w4Index, latestIndex, lockedBullish, false, true)",
+            "zigPricePass and aStructurePass and cStructurePass",
+        ):
+            self.assertIn(token, self.source)
+
+    def test_w1_development_uses_preceding_degree_swing_not_rolling_range(self):
+        for token in (
+            "f_previous_degree_opposite_index(index, pivotType)",
+            "precedingOppositeIndex = f_previous_degree_opposite_index(startIndex, startType)",
+            "oppositePrice = precedingOppositeIndex >= 0 ? array.get(swingPrices, precedingOppositeIndex)",
+            "importantOppositeBar = precedingOppositeIndex >= 0 ? array.get(swingBars, precedingOppositeIndex)",
+            "144-day Important H/L window supplies context and significance",
+        ):
+            self.assertIn(token, self.source)
+
+    def test_locked_fib_uses_actual_point0_to_wave1_range(self):
+        for token in (
+            "fibTerminalPrice = not na(lockedW1Price) ? lockedW1Price : lockedW1DevelopmentLevel",
+            "lockedWaveRange = math.abs(fibTerminalPrice - lockedBasePrice)",
+            "lockedBasePrice + lockedWaveRange * ratio",
+            "lockedBasePrice - lockedWaveRange * ratio",
+        ):
+            self.assertIn(token, self.source)
+        self.assertNotIn("importantRange = lockedImportantHigh - lockedImportantLow", self.source)
         developed = self.source.index('lastReasonCode := "W1_DEVELOPED"')
         confirmed = self.source.index('lastReasonCode := "W1_CONFIRMED"', developed)
         self.assertLess(developed, confirmed)
@@ -363,6 +422,7 @@ class ElliottWavePineContractTests(unittest.TestCase):
         self.assertIn("0-X_CLOSED_BREAK", self.source)
         self.assertIn("DOUBLE_CONFIRMATION_PENDING", self.source)
         self.assertIn("max_bars_back(close, 5000)", self.source)
+        self.assertIn("max_bars_back(time, 5000)", self.source)
 
     def test_v4_triple_uses_distinct_xx_component_and_terminal_z(self):
         self.assertIn('primary := "W-X-Y-XX-Z"', self.source)
@@ -470,21 +530,26 @@ class ElliottWavePineContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.source)
 
-    def test_searching_state_keeps_a_non_authoritative_structural_wave_map(self):
+    def test_searching_never_draws_sequential_elliott_labels(self):
         for token in (
             'indicator("Elliott Wave Notes Overlay v4.2 Multi-Cycle"',
-            'showSearchWaveMap = input.bool(true',
+            'showSearchWaveMap = input.bool(false, "Show raw pivot context while searching"',
             'dashboardMode = input.string("Hidden"',
-            'candidateState == "SEARCHING"',
-            "completedCycleCount == 0",
-            "if barstate.islast and f_is_candidate_mode() and showSearchWaveMap",
-            "structuralAllSwings ? f_phase(i) : f_wave_phase(i)",
             "f_latest_context_anchor_index",
             "f_redraw(true, true, true, false)",
-            "f_redraw(true, true, false, true)",
-            "context only; they do not change or override the authoritative candidate state",
         ):
             self.assertIn(token, self.source)
+        self.assertNotIn(
+            'f_is_candidate_mode() and showSearchWaveMap and candidateState == "SEARCHING"',
+            self.source,
+        )
+        self.assertNotIn("f_redraw(true, true, false, true)", self.source)
+
+    def test_last_bar_refreshes_only_the_authoritative_candidate_path(self):
+        self.assertIn(
+            "if barstate.islast and f_is_candidate_mode()\n    f_redraw_candidate()",
+            self.source,
+        )
 
 
 if __name__ == "__main__":

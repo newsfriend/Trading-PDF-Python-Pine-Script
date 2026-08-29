@@ -4032,7 +4032,22 @@ def _w1_development_evidence(
 
     start = swings[start_idx]
     end = swings[end_idx]
-    opposite_price = start.important_high if bullish else start.important_low
+    preceding_opposite = next(
+        (
+            swing
+            for swing in reversed(swings[:start_idx])
+            if swing.kind == -start.kind
+            and (swing.degree_significant or swing.important_extreme)
+        ),
+        None,
+    )
+    opposite_price = (
+        preceding_opposite.price
+        if preceding_opposite is not None
+        else start.important_high
+        if bullish
+        else start.important_low
+    )
     degree_range = abs(opposite_price - start.price)
     development_level = start.price + (
         cfg.degree_retrace * degree_range * (1.0 if bullish else -1.0)
@@ -4079,7 +4094,11 @@ def _w1_development_evidence(
 
     degree_progress = _safe_ratio(maximum_excursion, degree_range)
     prior_extreme_position = (
-        start.important_high_position if bullish else start.important_low_position
+        preceding_opposite.position
+        if preceding_opposite is not None
+        else start.important_high_position
+        if bullish
+        else start.important_low_position
     )
     prior_duration = (
         start.position - int(prior_extreme_position)

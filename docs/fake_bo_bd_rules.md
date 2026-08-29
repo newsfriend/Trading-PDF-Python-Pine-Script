@@ -24,3 +24,12 @@ fabricated when their required data is absent from OHLCV.
 
 Signals are evaluated on closed candles by default and do not back-paint onto
 the sweep candle.
+
+## Trade lifecycle and validation
+
+Only one setup is treated as active at a time. Its stop and target begin on the
+candle after the close-confirmed entry and disappear once either level is hit;
+the chart therefore does not present an expired level as a current trade. The
+Python backtest uses the same lifecycle. If one OHLC candle touches both stop
+and target, it records the stop first as the conservative result because the
+intrabar path is unknown.
