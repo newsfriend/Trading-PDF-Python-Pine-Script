@@ -551,6 +551,18 @@ class ElliottWavePineContractTests(unittest.TestCase):
             self.source,
         )
 
+    def test_expensive_searches_are_event_driven_and_pruned(self):
+        for token in (
+            "not baseLocked and barstate.isconfirmed and changed",
+            "w1Count + 4 <= totalCount",
+            "w1Count + w2Count + 3 <= totalCount",
+            "endIndex - startIndex >= 11",
+            "endIndex - startIndex >= 15",
+            "endIndex - startIndex >= 23",
+            "rescanning every candle produces no different result",
+        ):
+            self.assertIn(token, self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

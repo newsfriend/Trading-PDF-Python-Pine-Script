@@ -620,37 +620,39 @@ f_motive_structure_pass(startIndex, endIndex, bullish, allowOverlap, allowTrunca
     if startIndex >= 0 and totalCount >= 5
         for w1Option = 0 to 4
             w1Count = w1Option == 0 ? 1 : w1Option == 1 ? 5 : w1Option == 2 ? 9 : w1Option == 3 ? 13 : 17
-            for w2Option = 0 to 3
-                w2Count = w2Option == 0 ? 1 : w2Option == 1 ? 3 : w2Option == 2 ? 7 : 11
-                for w3Option = 0 to 4
-                    w3Count = w3Option == 0 ? 1 : w3Option == 1 ? 5 : w3Option == 2 ? 9 : w3Option == 3 ? 13 : 17
-                    for w4Option = 0 to 3
-                        w4Count = w4Option == 0 ? 1 : w4Option == 1 ? 3 : w4Option == 2 ? 7 : 11
-                        w5Count = totalCount - w1Count - w2Count - w3Count - w4Count
-                        w5Allowed = w5Count == 1 or w5Count == 5 or w5Count == 9 or w5Count == 13 or w5Count == 17
-                        if not found and w5Allowed
-                            i1 = startIndex + w1Count
-                            i2 = i1 + w2Count
-                            i3 = i2 + w3Count
-                            i4 = i3 + w4Count
-                            i5 = i4 + w5Count
-                            if i5 == endIndex
-                                p0 = array.get(swingPrices, startIndex)
-                                p1 = array.get(swingPrices, i1)
-                                p2 = array.get(swingPrices, i2)
-                                p3 = array.get(swingPrices, i3)
-                                p4 = array.get(swingPrices, i4)
-                                p5 = array.get(swingPrices, i5)
-                                directionPass = bullish ? p1 > p0 and p3 > p1 and p5 > p1 : p1 < p0 and p3 < p1 and p5 < p1
-                                w2Protected = bullish ? p2 > p0 : p2 < p0
-                                w4Protected = allowOverlap or (bullish ? p4 > p1 : p4 < p1)
-                                w5Progress = bullish ? p5 > p3 : p5 < p3
-                                truncationPass = allowTruncation and (bullish ? p5 > p1 : p5 < p1)
-                                w1Length = math.abs(p1 - p0)
-                                w3Length = math.abs(p3 - p2)
-                                w5Length = math.abs(p5 - p4)
-                                w3NotShortest = not (w3Length < w1Length and w3Length < w5Length)
-                                found := directionPass and w2Protected and w4Protected and (w5Progress or truncationPass) and w3NotShortest
+            if not found and w1Count + 4 <= totalCount
+                for w2Option = 0 to 3
+                    w2Count = w2Option == 0 ? 1 : w2Option == 1 ? 3 : w2Option == 2 ? 7 : 11
+                    if not found and w1Count + w2Count + 3 <= totalCount
+                        for w3Option = 0 to 4
+                            w3Count = w3Option == 0 ? 1 : w3Option == 1 ? 5 : w3Option == 2 ? 9 : w3Option == 3 ? 13 : 17
+                            if not found and w1Count + w2Count + w3Count + 2 <= totalCount
+                                for w4Option = 0 to 3
+                                    w4Count = w4Option == 0 ? 1 : w4Option == 1 ? 3 : w4Option == 2 ? 7 : 11
+                                    w5Count = totalCount - w1Count - w2Count - w3Count - w4Count
+                                    w5Allowed = w5Count == 1 or w5Count == 5 or w5Count == 9 or w5Count == 13 or w5Count == 17
+                                    if not found and w5Allowed
+                                        i1 = startIndex + w1Count
+                                        i2 = i1 + w2Count
+                                        i3 = i2 + w3Count
+                                        i4 = i3 + w4Count
+                                        i5 = i4 + w5Count
+                                        p0 = array.get(swingPrices, startIndex)
+                                        p1 = array.get(swingPrices, i1)
+                                        p2 = array.get(swingPrices, i2)
+                                        p3 = array.get(swingPrices, i3)
+                                        p4 = array.get(swingPrices, i4)
+                                        p5 = array.get(swingPrices, i5)
+                                        directionPass = bullish ? p1 > p0 and p3 > p1 and p5 > p1 : p1 < p0 and p3 < p1 and p5 < p1
+                                        w2Protected = bullish ? p2 > p0 : p2 < p0
+                                        w4Protected = allowOverlap or (bullish ? p4 > p1 : p4 < p1)
+                                        w5Progress = bullish ? p5 > p3 : p5 < p3
+                                        truncationPass = allowTruncation and (bullish ? p5 > p1 : p5 < p1)
+                                        w1Length = math.abs(p1 - p0)
+                                        w3Length = math.abs(p3 - p2)
+                                        w5Length = math.abs(p5 - p4)
+                                        w3NotShortest = not (w3Length < w1Length and w3Length < w5Length)
+                                        found := directionPass and w2Protected and w4Protected and (w5Progress or truncationPass) and w3NotShortest
     found
 
 f_candidate_for_count(endIndex, internalCount) =>
@@ -948,7 +950,8 @@ f_eval_simple_correction(startIndex, endIndex) =>
     selectedSubtype = "SIMPLE_CORRECTION_FORMING"
     sawBTimeFailure = false
     sawCTimeFailure = false
-    if startIndex >= 0 and endIndex > startIndex
+    // Smallest valid Flat is 3-3-5 = 11 retained moves.
+    if startIndex >= 0 and endIndex - startIndex >= 11
         for aOption = 0 to 4
             aCount = f_impulse_count(aOption)
             for bOption = 0 to 2
@@ -1050,7 +1053,8 @@ f_eval_triangle(startIndex, endIndex, requireBreak) =>
     thrustMax = float(na)
     terminalIndex = endIndex
     confirmationIndex = endIndex
-    if startIndex >= 0 and endIndex > startIndex
+    // Five corrective legs require at least 3 moves each.
+    if startIndex >= 0 and endIndex - startIndex >= 15
         for aOption = 0 to 2
             aCount = f_correction_count_option(aOption)
             for bOption = 0 to 2
@@ -1216,7 +1220,9 @@ f_eval_complex_correction(startIndex, endIndex, allowTriple) =>
     terminalIndex = endIndex
     confirmationIndex = endIndex
     pendingFound = false
-    if startIndex >= 0 and endIndex > startIndex
+    // Smallest Double is W11-X1-Y11 = 23 retained moves. Avoid entering the
+    // nested component classifiers for the far more common shorter paths.
+    if startIndex >= 0 and endIndex - startIndex >= 23
         for wOption = 0 to 2
             wCount = f_complex_component_count(wOption)
             wIndex = startIndex + wCount
@@ -2163,7 +2169,11 @@ else if not na(pivotLow)
     changed := swingChanged
     retentionInvalidated := endpointEvicted
 
-if f_is_candidate_mode() and not baseLocked and barstate.isconfirmed
+// A new confirmed swing is the only event that can create or revise a Point-0
+// candidate. The development function retains the exact historical touch bar,
+// so rescanning every candle produces no different result and can exceed
+// TradingView's total execution budget.
+if f_is_candidate_mode() and not baseLocked and barstate.isconfirmed and changed
     [developedStart, developedBullish, developedBar, developedLevel, developedProgress, developedTimeRatio, developedTimeRule] = f_find_developed_base()
     if developedStart >= 0
         baseLocked := true
